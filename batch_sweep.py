@@ -3,7 +3,7 @@ import os
 import time
 import duckdb
 import numpy as np
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, hf_hub_download
 
 from glicko2 import (
     LILA_RATING_PERIOD_DAYS,
@@ -13,42 +13,52 @@ from glicko2 import (
 )
 
 
-def stream_dataset(
+def prepare_dataset(
     repo_id: str,
     year: str,
     months: list[str],
-    speed: str,
-    output_path: str,
+    speed: str | None,
+    label: str,
     start_date: str | None = None,
     end_date: str | None = None,
+    refresh: bool = False,
     hf_token: str | None = None,
 ) -> str:
-    """Streams and stitches filtered games across one or more months from Hugging Face."""
+    """
+    Downloads Parquet shards via hf_hub_download (1 resolver request per shard)
+    and extracts an isolated RD-tuning Parquet file.
+    """
+    out_path = f"{label}_rd_tuning.parquet"
+    if not refresh and os.path.exists(out_path):
+        print(f"Using cached Parquet file: {out_path}")
+        return out_path
+
     api = HfApi(token=hf_token)
     repo_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
 
-    shard_urls: list[str] = []
+    shard_paths: list[str] = []
     for m in months:
-        m_padded = m.zfill(2)
-        prefix = f"data/year={year}/month={m_padded}/"
-        matched = [
-            f"hf://datasets/{repo_id}/{p}"
-            for p in repo_files
-            if p.startswith(prefix) and p.endswith(".parquet")
-        ]
+        prefix = f"data/year={year}/month={m}/"
+        matched = [p for p in repo_files if p.startswith(prefix) and p.endswith(".parquet")]
         if not matched:
             raise FileNotFoundError(f"No Parquet shards found under {prefix} in {repo_id}")
-        shard_urls.extend(matched)
+        shard_paths.extend(matched)
 
-    months_display = ",".join(m.zfill(2) for m in months)
-    print(f"Found {len(shard_urls)} shard(s) across {year}-[{months_display}]. Streaming {speed} games -> {output_path}...")
+    print(f"Fetching {len(shard_paths)} shard(s) via hf_hub_download...")
     t0 = time.perf_counter()
 
-    con = duckdb.connect()
-    con.execute("INSTALL httpfs; LOAD httpfs;")
-    if hf_token:
-        con.execute(f"CREATE SECRET hf_secret (TYPE HUGGINGFACE, TOKEN '{hf_token}');")
+    local_shards: list[str] = []
+    for idx, rel_path in enumerate(shard_paths, 1):
+        print(f"  [{idx}/{len(shard_paths)}] {rel_path}")
+        local_file = hf_hub_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            filename=rel_path,
+            token=hf_token,
+        )
+        local_shards.append(local_file)
 
+    con = duckdb.connect()
     con.execute("SET memory_limit = '10GB';")
     con.execute("SET temp_directory = '/tmp/duckdb_spill';")
     con.execute("PRAGMA enable_progress_bar = true;")
@@ -63,8 +73,7 @@ def stream_dataset(
         "UTCDate IS NOT NULL",
         "UTCTime IS NOT NULL",
     ]
-
-    if speed.lower() != "all":
+    if speed:
         where_clauses.append(f"Event LIKE '%{speed}%'")
     if start_date:
         where_clauses.append(f"UTCDate >= DATE '{start_date}'")
@@ -72,6 +81,8 @@ def stream_dataset(
         where_clauses.append(f"UTCDate <= DATE '{end_date}'")
 
     where_sql = " AND ".join(where_clauses)
+    pool_desc = speed or repo_id.split("/")[-1]
+    print(f"Extracting {pool_desc} -> {out_path}...")
 
     con.execute(f"""
     COPY (
@@ -87,10 +98,10 @@ def stream_dataset(
             WhiteElo AS white_elo,
             BlackElo AS black_elo,
             TimeControl AS time_control
-        FROM read_parquet({shard_urls})
+        FROM read_parquet({local_shards})
         WHERE {where_sql}
         ORDER BY UTCDate ASC, UTCTime ASC
-    ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+    ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
     """)
 
     summary = con.execute(f"""
@@ -98,14 +109,14 @@ def stream_dataset(
             COUNT(*),
             MIN(to_timestamp(timestamp)),
             MAX(to_timestamp(timestamp))
-        FROM '{output_path}'
+        FROM '{out_path}'
     """).fetchone()
 
     print(
-        f"Streamed {summary[0]:,} games ({summary[1]} to {summary[2]}) "
-        f"to {output_path} in {time.perf_counter() - t0:.2f}s"
+        f"  Saved {summary[0]:,} {pool_desc} games ({summary[1]} to {summary[2]}) "
+        f"in {time.perf_counter() - t0:.2f}s"
     )
-    return output_path
+    return out_path
 
 
 def run_sweep(
@@ -162,60 +173,60 @@ def run_sweep(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Stream and stitch Lichess games for Glicko-2 rating period sweep.")
+    parser = argparse.ArgumentParser(description="Download and stitch Lichess games for Glicko-2 rating period sweep.")
     parser.add_argument("--repo", type=str, default="Lichess/standard-chess-games", help="Hugging Face dataset repo ID")
     parser.add_argument("--year", type=str, default="2015", help="Partition year (e.g. 2015, 2025)")
-    parser.add_argument("--months", type=str, nargs="+", default=["01"], help="One or more months to stitch together (e.g. 01 02 03)")
-    parser.add_argument("--speed", type=str, default="Classical", help="Time control pool (Bullet, Blitz, Rapid, Classical, or All)")
+    parser.add_argument("--months", type=str, nargs="+", default=["01"], help="One or more months to stitch (e.g. 01 02 03)")
+    parser.add_argument(
+        "--speed",
+        type=str,
+        choices=["Bullet", "Blitz", "Rapid", "Classical"],
+        default=None,
+        help="Rating pool filter for standard chess (omit for single-pool variants)",
+    )
     parser.add_argument("--start-date", type=str, default=None, help="Optional inclusive start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", type=str, default=None, help="Optional inclusive end date (YYYY-MM-DD)")
-    parser.add_argument("--warmup-days", type=float, default=None, help="Optional warmup duration in days (overrides default count warmup)")
-    parser.add_argument("--parquet", type=str, default=None, help="Local Parquet cache path (auto-named if omitted)")
-    parser.add_argument("--refresh", action="store_true", help="Force re-streaming even if local Parquet cache exists")
+    parser.add_argument("--warmup-days", type=float, default=None, help="Optional warmup duration in days")
+    parser.add_argument("--refresh", action="store_true", help="Force re-extraction even if local Parquet cache exists")
     parser.add_argument("--summary", type=str, default=os.environ.get("GITHUB_STEP_SUMMARY"), help="Markdown summary output path")
-    parser.add_argument("--csv", type=str, default=None, help="Output CSV path for sweep results")
     args = parser.parse_args()
+
+    if args.repo == "Lichess/standard-chess-games" and not args.speed:
+        parser.error("--speed (Bullet, Blitz, Rapid, or Classical) is required for Lichess/standard-chess-games.")
 
     print(f"Numba parallel worker threads: {active_numba_threads()}")
 
     months_padded = [m.zfill(2) for m in args.months]
     month_tag = months_padded[0] if len(months_padded) == 1 else f"{months_padded[0]}-to-{months_padded[-1]}"
+    date_tag = f"_{args.start_date or 'start'}_to_{args.end_date or 'end'}" if (args.start_date or args.end_date) else ""
+    pool_tag = args.speed.lower() if args.speed else args.repo.split("/")[-1].replace("-chess-games", "").replace("-", "_")
+    label = f"{pool_tag}_{args.year}_{month_tag}{date_tag}"
 
-    date_tag = ""
-    if args.start_date or args.end_date:
-        date_tag = f"_{args.start_date or 'start'}_to_{args.end_date or 'end'}"
-
-    label = f"{args.speed.lower()}_{args.year}_{month_tag}{date_tag}"
-    parquet_path = args.parquet or f"{label}_rd_tuning.parquet"
-
-    if args.refresh or not os.path.exists(parquet_path):
-        stream_dataset(
-            repo_id=args.repo,
-            year=args.year,
-            months=months_padded,
-            speed=args.speed,
-            output_path=parquet_path,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            hf_token=os.environ.get("HF_TOKEN"),
-        )
-    else:
-        print(f"Using cached Parquet file: {parquet_path}")
+    parquet_path = prepare_dataset(
+        repo_id=args.repo,
+        year=args.year,
+        months=months_padded,
+        speed=args.speed,
+        label=label,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        refresh=args.refresh,
+        hf_token=os.environ.get("HF_TOKEN"),
+    )
 
     grid = np.unique(
         np.concatenate([
-            np.linspace(0.25, 2.0, 15),
-            np.array([2.5, 3.0, 3.5, 4.0, LILA_RATING_PERIOD_DAYS, 6.0, 8.0, 10.0]),
+            np.linspace(0.75, 2.25, 13),
+            np.array([2.5, 3.0, 3.5, 4.0, LILA_RATING_PERIOD_DAYS, 5.0, 5.5, 6.0]),
         ])
     )
 
-    csv_out = args.csv or f"{label}_sweep.csv"
     run_sweep(
         label,
         parquet_path,
         grid,
         warmup_days=args.warmup_days,
         summary_path=args.summary,
-        csv_path=csv_out,
+        csv_path=f"{label}_sweep.csv",
     )
 
