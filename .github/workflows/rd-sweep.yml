@@ -8,13 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       category:
-        description: "Space-separated categories or 'all' (bullet blitz rapid classical antichess atomic chess960 crazyhouse horde king-of-the-hill racing-kings three-check)"
+        description: "Space-separated categories or 'all'"
         required: true
         default: "all"
       partitions:
-        description: "Space-separated YYYY or YYYY-MM partitions (e.g. 2013-01 or 2015 2016)"
+        description: "Years, months, or ranges (e.g. 2013..2016, 2013 2014, or 2018-01..2018-06)"
         required: true
-        default: "2013"
+        default: "2013..2015"
       warmup_days:
         description: "Optional warmup days (blank = default count warmup)"
         required: false
@@ -29,7 +29,7 @@ jobs:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       PYTHONUNBUFFERED: "1"
       CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'all' }}
-      PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013' }}
+      PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013..2015' }}
       WARMUP_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
 
     steps:

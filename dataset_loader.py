@@ -40,9 +40,41 @@ def resolve_categories(raw_categories: list[str]) -> list[str]:
     return resolved
 
 
+def expand_partitions(partitions: list[str]) -> list[str]:
+    """Expands '2013..2015' -> ['2013', '2014', '2015'] and '2015-01..2015-03' -> ['2015-01', '2015-02', '2015-03']."""
+    expanded: list[str] = []
+    for raw in partitions:
+        token = raw.strip()
+        if ".." not in token:
+            expanded.append(token)
+            continue
+
+        start_s, _, end_s = token.partition("..")
+        if len(start_s) == 4 and len(end_s) == 4 and start_s.isdigit() and end_s.isdigit():
+            y1, y2 = int(start_s), int(end_s)
+            if y1 > y2:
+                raise ValueError(f"Invalid year range '{token}': start > end.")
+            expanded.extend(str(y) for y in range(y1, y2 + 1))
+        elif len(start_s) == 7 and len(end_s) == 7 and start_s == "-" and end_s == "-":
+            y1, m1 = int(start_s[:4]), int(start_s[5:])
+            y2, m2 = int(end_s[:4]), int(end_s[5:])
+            if (y1, m1) > (y2, m2) or not (1 <= m1 <= 12 and 1 <= m2 <= 12):
+                raise ValueError(f"Invalid month range '{token}'.")
+            cur_y, cur_m = y1, m1
+            while (cur_y, cur_m) <= (y2, m2):
+                expanded.append(f"{cur_y}-{cur_m:02d}")
+                cur_m += 1
+                if cur_m > 12:
+                    cur_m = 1
+                    cur_y += 1
+        else:
+            raise ValueError(f"Invalid range '{token}'. Use YYYY..YYYY or YYYY-MM..YYYY-MM.")
+    return expanded
+
+
 def resolve_partition_prefixes(partitions: list[str]) -> list[str]:
     prefixes: list[str] = []
-    for raw in partitions:
+    for raw in expand_partitions(partitions):
         p = raw.strip()
         if len(p) == 4 and p.isdigit():
             prefixes.append(f"data/year={p}/")
@@ -51,7 +83,7 @@ def resolve_partition_prefixes(partitions: list[str]) -> list[str]:
             if sep == "-" and len(year) == 4 and year.isdigit() and len(month) in (1, 2) and month.isdigit():
                 prefixes.append(f"data/year={year}/month={month.zfill(2)}/")
             else:
-                raise ValueError(f"Invalid partition '{raw}'. Use YYYY (e.g. 2015) or YYYY-MM (e.g. 2015-01).")
+                raise ValueError(f"Invalid partition '{raw}'. Use YYYY, YYYY-MM, YYYY..YYYY, or YYYY-MM..YYYY-MM.")
     return prefixes
 
 

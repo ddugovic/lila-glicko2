@@ -2,7 +2,7 @@ import argparse
 import os
 import time
 import numpy as np
-from dataset_loader import CATEGORIES, prepare_datasets, resolve_categories
+from dataset_loader import CATEGORIES, expand_partitions, prepare_datasets, resolve_categories
 from glicko2 import LILA_RATING_PERIOD_DAYS, active_numba_threads, load_encoded_games, sweep_rating_periods
 
 
@@ -69,10 +69,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     categories = resolve_categories(args.category)
+    partitions = expand_partitions(args.partitions)
     print(f"Numba parallel worker threads: {active_numba_threads()}")
 
-    first_part = next(iter(args.partitions))
-    part_tag = first_part if len(args.partitions) == 1 else f"{first_part}-to-{args.partitions[-1]}"
+    first_part = next(iter(partitions))
+    part_tag = first_part if len(partitions) == 1 else f"{first_part}-to-{partitions[-1]}"
     date_tag = f"_{args.start_date or 'start'}_to_{args.end_date or 'end'}" if (args.start_date or args.end_date) else ""
 
     grid = np.unique(np.concatenate([
@@ -83,7 +84,7 @@ if __name__ == "__main__":
     try:
         datasets = prepare_datasets(
             categories=categories,
-            partitions=args.partitions,
+            partitions=partitions,
             part_tag=part_tag,
             date_tag=date_tag,
             start_date=args.start_date,
