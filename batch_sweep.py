@@ -69,8 +69,8 @@ if __name__ == "__main__":
     date_tag = f"_{args.start_date or 'start'}_to_{args.end_date or 'end'}" if (args.start_date or args.end_date) else ""
 
     grid = np.unique(np.concatenate([
-        np.linspace(0.75, 2.25, 13),
-        np.array([2.5, 3.0, 3.5, 4.0, LILA_RATING_PERIOD_DAYS, 5.0, 5.5, 6.0, 8.0, 10.0]),
+        np.linspace(0.75, 2.25, 7),
+        np.array([2.5, 3.0, 3.5, 4.0, LILA_RATING_PERIOD_DAYS, 5.0, 5.5, 6.0]),
     ]))
 
     for cat in categories:
