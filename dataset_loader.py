@@ -3,39 +3,73 @@ import time
 import duckdb
 from huggingface_hub import HfApi, hf_hub_download
 
+# Maps every Lichess rating category to (hf_repo_id, optional_event_filter)
+CATEGORIES: dict[str, tuple[str, str | None]] = {
+    "bullet": ("Lichess/standard-chess-games", "Bullet"),
+    "blitz": ("Lichess/standard-chess-games", "Blitz"),
+    "rapid": ("Lichess/standard-chess-games", "Rapid"),
+    "classical": ("Lichess/standard-chess-games", "Classical"),
+    "antichess": ("Lichess/antichess-chess-games", None),
+    "atomic": ("Lichess/atomic-chess-games", None),
+    "chess960": ("Lichess/chess960-chess-games", None),
+    "crazyhouse": ("Lichess/crazyhouse-chess-games", None),
+    "horde": ("Lichess/horde-chess-games", None),
+    "king-of-the-hill": ("Lichess/king-of-the-hill-chess-games", None),
+    "racing-kings": ("Lichess/racing-kings-chess-games", None),
+    "three-check": ("Lichess/three-check-chess-games", None),
+}
+
+
+def resolve_categories(raw_categories: list[str]) -> list[str]:
+    resolved: list[str] = []
+    for raw in raw_categories:
+        key = raw.strip().lower()
+        if key == "all":
+            for c in CATEGORIES:
+                if c not in resolved:
+                    resolved.append(c)
+        elif key in CATEGORIES:
+            if key not in resolved:
+                resolved.append(key)
+        else:
+            valid = ", ".join(["all", *CATEGORIES.keys()])
+            raise ValueError(f"Unknown category '{raw}'. Valid choices: {valid}")
+    return resolved
+
 
 def resolve_partition_prefixes(partitions: list[str]) -> list[str]:
-    """Converts ['2015'] -> ['data/year=2015/'] and ['2015-01'] -> ['data/year=2015/month=01/']."""
     prefixes: list[str] = []
     for raw in partitions:
         p = raw.strip()
         if len(p) == 4 and p.isdigit():
             prefixes.append(f"data/year={p}/")
-        elif len(p) in (6, 7) and p[4] == "-" and p[:4].isdigit() and p[5:].isdigit():
-            prefixes.append(f"data/year={p[:4]}/month={p[5:].zfill(2)}/")
         else:
-            raise ValueError(f"Invalid partition '{raw}'. Use YYYY (e.g. 2015) or YYYY-MM (e.g. 2015-01).")
+            year, sep, month = p.partition("-")
+            if sep == "-" and len(year) == 4 and year.isdigit() and len(month) in (1, 2) and month.isdigit():
+                prefixes.append(f"data/year={year}/month={month.zfill(2)}/")
+            else:
+                raise ValueError(f"Invalid partition '{raw}'. Use YYYY (e.g. 2015) or YYYY-MM (e.g. 2015-01).")
     return prefixes
 
 
 def prepare_dataset(
-    repo_id: str,
+    category: str,
     partitions: list[str],
-    speed: str | None,
     label: str,
     start_date: str | None = None,
     end_date: str | None = None,
     refresh: bool = False,
     hf_token: str | None = None,
 ) -> str | None:
-    """Downloads shards 1-by-1 via hf_hub_download and extracts an isolated RD-tuning Parquet file."""
     out_path = f"{label}_rd_tuning.parquet"
     if not refresh and os.path.exists(out_path):
         print(f"Using cached Parquet file: {out_path}")
         return out_path
 
-    if speed == "Rapid" and all(int(p[:4]) <= 2017 for p in partitions):
-        print(f"  Skipping Rapid: 0 games exist before Dec 2, 2017 (partitions={partitions}).")
+    repo_id, event_filter = CATEGORIES[category]
+
+    if category == "rapid" and all(int(p[:4]) <= 2017 for p in partitions):
+        print(f"  Skipping rapid: 0 games exist before Dec 2, 2017 (partitions={partitions}).")
         return None
 
     prefixes = resolve_partition_prefixes(partitions)
@@ -46,7 +80,8 @@ def prepare_dataset(
     for prefix in prefixes:
         matched = [f for f in repo_files if f.startswith(prefix) and f.endswith(".parquet")]
         if not matched:
-            raise FileNotFoundError(f"No Parquet shards found under {prefix} in {repo_id}")
+            print(f"  Skipping {category}: no shards under {prefix} in {repo_id}.")
+            return None
         shard_paths.extend(matched)
 
     con = duckdb.connect()
@@ -62,16 +97,15 @@ def prepare_dataset(
         "UTCDate IS NOT NULL",
         "UTCTime IS NOT NULL",
     ]
-    if speed:
-        where_clauses.append(f"Event LIKE '%{speed}%'")
+    if event_filter:
+        where_clauses.append(f"Event LIKE '%{event_filter}%'")
     if start_date:
         where_clauses.append(f"UTCDate >= DATE '{start_date}'")
     if end_date:
         where_clauses.append(f"UTCDate <= DATE '{end_date}'")
 
     where_sql = " AND ".join(where_clauses)
-    pool_desc = speed or repo_id.split("/")[-1]
-    print(f"Streaming {len(shard_paths)} shard(s) 1-by-1 for {pool_desc} ({', '.join(partitions)}) -> {out_path}...")
+    print(f"Streaming {len(shard_paths)} shard(s) 1-by-1 for {category} ({', '.join(partitions)}) -> {out_path}...")
     t0 = time.perf_counter()
 
     compact_parts: list[str] = []
@@ -116,9 +150,9 @@ def prepare_dataset(
     if count == 0:
         if os.path.exists(out_path):
             os.remove(out_path)
-        print(f"  Skipping {pool_desc}: 0 games matched in {repo_id} (partitions={partitions}).")
+        print(f"  Skipping {category}: 0 games matched in {repo_id} (partitions={partitions}).")
         return None
 
-    print(f"  Saved {count:,} {pool_desc} games ({first_ts} to {last_ts}) in {time.perf_counter() - t0:.2f}s")
+    print(f"  Saved {count:,} {category} games ({first_ts} to {last_ts}) in {time.perf_counter() - t0:.2f}s")
     return out_path
 

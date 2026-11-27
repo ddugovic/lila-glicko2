@@ -2,7 +2,7 @@ import argparse
 import os
 import time
 import numpy as np
-from dataset_loader import prepare_dataset
+from dataset_loader import CATEGORIES, prepare_dataset, resolve_categories
 from glicko2 import LILA_RATING_PERIOD_DAYS, active_numba_threads, load_encoded_games, sweep_rating_periods
 
 
@@ -45,10 +45,15 @@ def run_sweep(name: str, path: str, grid: np.ndarray, warmup_days: float | None 
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download and stitch Lichess partitions for Glicko-2 rating period sweep.")
-    parser.add_argument("--repo", type=str, default="Lichess/standard-chess-games")
-    parser.add_argument("--partitions", type=str, nargs="+", default=["2015-01"])
-    parser.add_argument("--speed", type=str, choices=["Bullet", "Blitz", "Rapid", "Classical"], default=None)
+    parser = argparse.ArgumentParser(description="Download and stitch Lichess categories for Glicko-2 rating period sweep.")
+    parser.add_argument(
+        "--category",
+        type=str,
+        nargs="+",
+        default=["classical"],
+        help=f"One or more rating categories, or 'all' ({', '.join(['all', *CATEGORIES.keys()])})",
+    )
+    parser.add_argument("--partitions", type=str, nargs="+", default=["2013-01"])
     parser.add_argument("--start-date", type=str, default=None)
     parser.add_argument("--end-date", type=str, default=None)
     parser.add_argument("--warmup-days", type=float, default=None)
@@ -56,26 +61,29 @@ if __name__ == "__main__":
     parser.add_argument("--summary", type=str, default=os.environ.get("GITHUB_STEP_SUMMARY"))
     args = parser.parse_args()
 
-    if args.repo == "Lichess/standard-chess-games" and not args.speed:
-        parser.error("--speed (Bullet, Blitz, Rapid, or Classical) is required for Lichess/standard-chess-games.")
-
+    categories = resolve_categories(args.category)
     print(f"Numba parallel worker threads: {active_numba_threads()}")
+
     first_part = next(iter(args.partitions))
-    last_part = args.partitions[-1]
-    part_tag = first_part if len(args.partitions) == 1 else f"{first_part}-to-{last_part}"
+    part_tag = first_part if len(args.partitions) == 1 else f"{first_part}-to-{args.partitions[-1]}"
     date_tag = f"_{args.start_date or 'start'}_to_{args.end_date or 'end'}" if (args.start_date or args.end_date) else ""
-    pool_tag = args.speed.lower() if args.speed else args.repo.split("/")[-1].replace("-chess-games", "").replace("-", "_")
-    label = f"{pool_tag}_{part_tag}{date_tag}"
 
-    parquet_path = prepare_dataset(
-        repo_id=args.repo, partitions=args.partitions, speed=args.speed, label=label,
-        start_date=args.start_date, end_date=args.end_date, refresh=args.refresh, hf_token=os.environ.get("HF_TOKEN"),
-    )
+    grid = np.unique(np.concatenate([
+        np.linspace(0.75, 2.25, 13),
+        np.array([2.5, 3.0, 3.5, 4.0, LILA_RATING_PERIOD_DAYS, 5.0, 5.5, 6.0, 8.0, 10.0]),
+    ]))
 
-    if parquet_path:
-        grid = np.unique(np.concatenate([
-            np.linspace(0.75, 2.25, 13),
-            np.array([2.5, 3.0, 3.5, 4.0, LILA_RATING_PERIOD_DAYS, 5.0, 5.5, 6.0]),
-        ]))
-        run_sweep(label, parquet_path, grid, warmup_days=args.warmup_days, summary_path=args.summary, csv_path=f"{label}_sweep.csv")
+    for cat in categories:
+        label = f"{cat.replace('-', '_')}_{part_tag}{date_tag}"
+        parquet_path = prepare_dataset(
+            category=cat,
+            partitions=args.partitions,
+            label=label,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            refresh=args.refresh,
+            hf_token=os.environ.get("HF_TOKEN"),
+        )
+        if parquet_path:
+            run_sweep(label, parquet_path, grid, warmup_days=args.warmup_days, summary_path=args.summary, csv_path=f"{label}_sweep.csv")
 

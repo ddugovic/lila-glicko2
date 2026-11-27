@@ -7,18 +7,14 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      repo:
-        description: "Hugging Face dataset repo ID"
+      category:
+        description: "Space-separated categories or 'all' (bullet blitz rapid classical antichess atomic chess960 crazyhouse horde king-of-the-hill racing-kings three-check)"
         required: true
-        default: "Lichess/standard-chess-games"
+        default: "all"
       partitions:
         description: "Space-separated YYYY or YYYY-MM partitions (e.g. 2013-01 or 2015 2016)"
         required: true
         default: "2013"
-      speed:
-        description: "Space-separated speeds (e.g. Bullet Blitz Rapid Classical — leave blank for variants)"
-        required: false
-        default: "Bullet Blitz Rapid Classical"
       warmup_days:
         description: "Optional warmup days (blank = default count warmup)"
         required: false
@@ -31,9 +27,8 @@ jobs:
 
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.repo || 'Lichess/standard-chess-games' }}
+      CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'all' }}
       PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013' }}
-      SPEED: ${{ github.event_name == 'workflow_dispatch' && inputs.speed || 'Bullet Blitz Rapid Classical' }}
       WARMUP_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
 
     steps:
@@ -54,14 +49,7 @@ jobs:
           if [ -n "$WARMUP_DAYS" ]; then
             WARMUP_ARG="--warmup-days $WARMUP_DAYS"
           fi
-
-          if [ -z "$SPEED" ]; then
-            python3 batch_sweep.py --repo "$REPO" --partitions $PARTITIONS $WARMUP_ARG
-          else
-            for S in $SPEED; do
-              python3 batch_sweep.py --repo "$REPO" --partitions $PARTITIONS --speed "$S" $WARMUP_ARG
-            done
-          fi
+          python3 batch_sweep.py --category $CATEGORY --partitions $PARTITIONS $WARMUP_ARG
 
       - name: Upload sweep CSV artifacts
         uses: actions/upload-artifact@v6
