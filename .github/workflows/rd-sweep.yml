@@ -12,38 +12,44 @@ on:
         required: true
         default: "2015"
       months:
-        description: 'JSON array of months (e.g. ["01", "02", "03"])'
+        description: "Space-separated months to stitch (e.g. 01 02 03)"
         required: true
-        default: '["01"]'
-      speed:
-        description: "Time control pool (Bullet, Blitz, Rapid, Classical, All)"
+        default: "01 02 03"
+      speeds:
+        description: 'JSON array of speeds to run in parallel (e.g. ["Bullet", "Blitz", "Rapid", "Classical"])'
         required: true
-        default: "Classical"
+        default: '["Bullet", "Blitz", "Rapid", "Classical"]'
+      warmup_days:
+        description: "Optional warmup days (blank = default count warmup)"
+        required: false
+        default: ""
 
 jobs:
   configure:
     runs-on: ubuntu-latest
     outputs:
       year: ${{ github.event_name == 'workflow_dispatch' && inputs.year || '2015' }}
-      months: ${{ github.event_name == 'workflow_dispatch' && inputs.months || '["01"]' }}
-      speed: ${{ github.event_name == 'workflow_dispatch' && inputs.speed || 'Classical' }}
+      months: ${{ github.event_name == 'workflow_dispatch' && inputs.months || '01 02 03' }}
+      speeds: ${{ github.event_name == 'workflow_dispatch' && inputs.speeds || '["Bullet", "Blitz", "Rapid", "Classical"]' }}
+      warmup_days: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
     steps:
       - run: echo "Configured ${{ github.event_name }} sweep"
 
   sweep:
     needs: configure
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        month: ${{ fromJson(needs.configure.outputs.months) }}
+        speed: ${{ fromJson(needs.configure.outputs.speeds) }}
 
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       YEAR: ${{ needs.configure.outputs.year }}
-      MONTH: ${{ matrix.month }}
-      SPEED: ${{ needs.configure.outputs.speed }}
+      MONTHS: ${{ needs.configure.outputs.months }}
+      SPEED: ${{ matrix.speed }}
+      WARMUP_DAYS: ${{ needs.configure.outputs.warmup_days }}
 
     steps:
       - uses: actions/checkout@v6
@@ -57,13 +63,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Glicko-2 sweep
+      - name: Run stitched Glicko-2 sweep (${{ matrix.speed }})
         run: |
-          python3 batch_sweep.py --year $YEAR --month $MONTH --speed $SPEED
+          ARGS="--year $YEAR --months $MONTHS --speed $SPEED"
+          if [ -n "$WARMUP_DAYS" ]; then
+            ARGS="$ARGS --warmup-days $WARMUP_DAYS"
+          fi
+          python3 batch_sweep.py $ARGS
 
       - name: Upload sweep CSV artifact
         uses: actions/upload-artifact@v6
         with:
-          name: sweep-${{ env.YEAR }}-${{ env.MONTH }}-${{ env.SPEED }}
+          name: sweep-${{ env.YEAR }}-${{ env.SPEED }}
           path: "*_sweep.csv"
 

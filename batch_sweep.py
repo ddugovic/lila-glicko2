@@ -16,27 +16,32 @@ from glicko2 import (
 def stream_dataset(
     repo_id: str,
     year: str,
-    month: str,
+    months: list[str],
     speed: str,
     output_path: str,
     start_date: str | None = None,
     end_date: str | None = None,
     hf_token: str | None = None,
 ) -> str:
-    """Streams filtered games from Hugging Face via DuckDB HTTP range requests into a compact Parquet file."""
+    """Streams and stitches filtered games across one or more months from Hugging Face."""
     api = HfApi(token=hf_token)
-    prefix = f"data/year={year}/month={month}/"
     repo_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
-    shard_urls = [
-        f"hf://datasets/{repo_id}/{p}"
-        for p in repo_files
-        if p.startswith(prefix) and p.endswith(".parquet")
-    ]
 
-    if not shard_urls:
-        raise FileNotFoundError(f"No Parquet shards found under {prefix} in {repo_id}")
+    shard_urls: list[str] = []
+    for m in months:
+        m_padded = m.zfill(2)
+        prefix = f"data/year={year}/month={m_padded}/"
+        matched = [
+            f"hf://datasets/{repo_id}/{p}"
+            for p in repo_files
+            if p.startswith(prefix) and p.endswith(".parquet")
+        ]
+        if not matched:
+            raise FileNotFoundError(f"No Parquet shards found under {prefix} in {repo_id}")
+        shard_urls.extend(matched)
 
-    print(f"Found {len(shard_urls)} shard(s) for {year}-{month}. Streaming {speed} games -> {output_path}...")
+    months_display = ",".join(m.zfill(2) for m in months)
+    print(f"Found {len(shard_urls)} shard(s) across {year}-[{months_display}]. Streaming {speed} games -> {output_path}...")
     t0 = time.perf_counter()
 
     con = duckdb.connect()
@@ -103,14 +108,25 @@ def stream_dataset(
     return output_path
 
 
-def run_sweep(name: str, path: str, grid: np.ndarray, summary_path: str | None = None, csv_path: str | None = None):
+def run_sweep(
+    name: str,
+    path: str,
+    grid: np.ndarray,
+    warmup_days: float | None = None,
+    summary_path: str | None = None,
+    csv_path: str | None = None,
+):
     print(f"\n=== Dataset: {name} ({path}) ===")
     t0 = time.perf_counter()
     white_ids, black_ids, scores, days, n_players = load_encoded_games(path)
     print(f"Loaded {len(scores):,} games ({n_players:,} players) in {time.perf_counter() - t0:.2f}s")
 
-    # Scale warmup dynamically (e.g., 10% of games, capped at 500k)
-    warmup = min(500_000, len(scores) // 10)
+    if warmup_days is not None:
+        warmup = int(np.searchsorted(days, days[0] + warmup_days))
+        print(f"Using time-based warmup: {warmup_days:.1f} days ({warmup:,} games)")
+    else:
+        warmup = min(500_000, len(scores) // 10)
+        print(f"Using default count-based warmup: {warmup:,} games")
 
     t1 = time.perf_counter()
     log_losses, brier_scores = sweep_rating_periods(
@@ -136,7 +152,7 @@ def run_sweep(name: str, path: str, grid: np.ndarray, summary_path: str | None =
 
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as f:
-            f.write(f"### Glicko-2 Sweep: `{name}` ({len(scores):,} games, {n_players:,} players)\n\n")
+            f.write(f"### Glicko-2 Sweep: `{name}` ({len(scores):,} games, {n_players:,} players, warmup={warmup:,})\n\n")
             f.write("| Metric | Rating Period (days) | Value |\n")
             f.write("| :--- | :---: | :---: |\n")
             f.write(f"| **Best Log-Loss** | `{grid[best_ll_idx]:.3f}d` | `{log_losses[best_ll_idx]:.6f}` |\n")
@@ -146,13 +162,14 @@ def run_sweep(name: str, path: str, grid: np.ndarray, summary_path: str | None =
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Stream Lichess games and run Glicko-2 rating period sweep.")
+    parser = argparse.ArgumentParser(description="Stream and stitch Lichess games for Glicko-2 rating period sweep.")
     parser.add_argument("--repo", type=str, default="Lichess/standard-chess-games", help="Hugging Face dataset repo ID")
     parser.add_argument("--year", type=str, default="2015", help="Partition year (e.g. 2015, 2025)")
-    parser.add_argument("--month", type=str, default="01", help="Partition month (01-12)")
-    parser.add_argument("--speed", type=str, default="Classical", help="Time control filter (Bullet, Blitz, Rapid, Classical, or All)")
-    parser.add_argument("--start-date", type=str, default=None, help="Optional inclusive start date (YYYY-MM-DD) for row-group pruning")
-    parser.add_argument("--end-date", type=str, default=None, help="Optional inclusive end date (YYYY-MM-DD) for row-group pruning")
+    parser.add_argument("--months", type=str, nargs="+", default=["01"], help="One or more months to stitch together (e.g. 01 02 03)")
+    parser.add_argument("--speed", type=str, default="Classical", help="Time control pool (Bullet, Blitz, Rapid, Classical, or All)")
+    parser.add_argument("--start-date", type=str, default=None, help="Optional inclusive start date (YYYY-MM-DD)")
+    parser.add_argument("--end-date", type=str, default=None, help="Optional inclusive end date (YYYY-MM-DD)")
+    parser.add_argument("--warmup-days", type=float, default=None, help="Optional warmup duration in days (overrides default count warmup)")
     parser.add_argument("--parquet", type=str, default=None, help="Local Parquet cache path (auto-named if omitted)")
     parser.add_argument("--refresh", action="store_true", help="Force re-streaming even if local Parquet cache exists")
     parser.add_argument("--summary", type=str, default=os.environ.get("GITHUB_STEP_SUMMARY"), help="Markdown summary output path")
@@ -161,18 +178,21 @@ if __name__ == "__main__":
 
     print(f"Numba parallel worker threads: {active_numba_threads()}")
 
+    months_padded = [m.zfill(2) for m in args.months]
+    month_tag = months_padded[0] if len(months_padded) == 1 else f"{months_padded[0]}-to-{months_padded[-1]}"
+
     date_tag = ""
     if args.start_date or args.end_date:
         date_tag = f"_{args.start_date or 'start'}_to_{args.end_date or 'end'}"
 
-    label = f"{args.speed.lower()}_{args.year}_{args.month}{date_tag}"
+    label = f"{args.speed.lower()}_{args.year}_{month_tag}{date_tag}"
     parquet_path = args.parquet or f"{label}_rd_tuning.parquet"
 
     if args.refresh or not os.path.exists(parquet_path):
         stream_dataset(
             repo_id=args.repo,
             year=args.year,
-            month=args.month,
+            months=months_padded,
             speed=args.speed,
             output_path=parquet_path,
             start_date=args.start_date,
@@ -190,5 +210,12 @@ if __name__ == "__main__":
     )
 
     csv_out = args.csv or f"{label}_sweep.csv"
-    run_sweep(label, parquet_path, grid, summary_path=args.summary, csv_path=csv_out)
+    run_sweep(
+        label,
+        parquet_path,
+        grid,
+        warmup_days=args.warmup_days,
+        summary_path=args.summary,
+        csv_path=csv_out,
+    )
 
