@@ -46,6 +46,12 @@ jobs:
 
       - name: Run Glicko-2 sweep
         run: |
+          echo "Event: ${{ github.event_name }} | Category: $CATEGORY | Partitions: $PARTITIONS | Warmup: ${WARMUP_DAYS:-default}"
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            echo "**Run Config:** event=\`${{ github.event_name }}\`, category=\`$CATEGORY\`, partitions=\`$PARTITIONS\`, warmup=\`${WARMUP_DAYS:-default}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
           WARMUP_ARG=""
           if [ -n "$WARMUP_DAYS" ]; then
             WARMUP_ARG="--warmup-days $WARMUP_DAYS"
