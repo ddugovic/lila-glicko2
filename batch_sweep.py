@@ -31,8 +31,8 @@ def run_sweep(
     lila_idx = int(np.argmin(np.abs(grid - LILA_RATING_PERIOD_DAYS)))
 
     print(f"Swept {len(grid)} values in {elapsed:.2f}s ({elapsed / len(grid):.3f}s/run)")
-    print(f"Best Log-Loss : period={grid[best_ll_idx]:.3f}d -> {log_losses[best_ll_idx]:.6f}")
-    print(f"Best Brier    : period={grid[best_bs_idx]:.3f}d -> {brier_scores[best_bs_idx]:.6f}")
+    print(f"Best Log-Loss : period={grid[best_ll_idx]:.3f}d -> log_loss={log_losses[best_ll_idx]:.6f}, brier={brier_scores[best_ll_idx]:.6f}")
+    print(f"Best Brier    : period={grid[best_bs_idx]:.3f}d -> log_loss={log_losses[best_bs_idx]:.6f}, brier={brier_scores[best_bs_idx]:.6f}")
     print(f"Lila Baseline : period={grid[lila_idx]:.3f}d -> log_loss={log_losses[lila_idx]:.6f}, brier={brier_scores[lila_idx]:.6f}")
 
     if csv_path:
@@ -44,11 +44,11 @@ def run_sweep(
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as f:
             f.write(f"### Glicko-2 Sweep: `{name}` ({len(scores):,} games, {n_players:,} players, warmup={warmup:,})\n\n")
-            f.write("| Metric | Rating Period (days) | Value |\n| :--- | :---: | :---: |\n")
-            f.write(f"| **Best Log-Loss** | `{grid[best_ll_idx]:.3f}d` | `{log_losses[best_ll_idx]:.6f}` |\n")
-            f.write(f"| **Best Brier** | `{grid[best_bs_idx]:.3f}d` | `{brier_scores[best_bs_idx]:.6f}` |\n")
-            f.write(f"| **Lila Baseline (Log-Loss)** | `{grid[lila_idx]:.3f}d` | `{log_losses[lila_idx]:.6f}` |\n")
-            f.write(f"| **Lila Baseline (Brier)** | `{grid[lila_idx]:.3f}d` | `{brier_scores[lila_idx]:.6f}` |\n\n")
+            f.write("| Benchmark | Rating Period (days) | Log-Loss | Brier |\n| :--- | :---: | :---: | :---: |\n")
+            f.write(f"| **Best Log-Loss** | `{grid[best_ll_idx]:.3f}d` | `{log_losses[best_ll_idx]:.6f}` | `{brier_scores[best_ll_idx]:.6f}` |\n")
+            f.write(f"| **Best Brier** | `{grid[best_bs_idx]:.3f}d` | `{log_losses[best_bs_idx]:.6f}` | `{brier_scores[best_bs_idx]:.6f}` |\n")
+            f.write(f"| **Lila Baseline** | `{grid[lila_idx]:.3f}d` | `{log_losses[lila_idx]:.6f}` | `{brier_scores[lila_idx]:.6f}` |\n\n")
+
 
 
 if __name__ == "__main__":
