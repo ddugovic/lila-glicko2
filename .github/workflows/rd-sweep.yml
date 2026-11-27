@@ -7,8 +7,8 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      preset:
-        description: "Quick category preset (select 'custom' to use the text box below)"
+      category:
+        description: "Rating category or group preset to sweep"
         type: choice
         required: true
         default: "all"
@@ -16,16 +16,18 @@ on:
           - all
           - standard (bullet blitz rapid classical)
           - variants (all 8 variants)
-          - classical
-          - rapid
-          - blitz
           - bullet
-          - custom
-      custom_categories:
-        description: "Only used if preset=custom. Valid: bullet blitz rapid classical antichess atomic chess960 crazyhouse horde king-of-the-hill racing-kings three-check"
-        type: string
-        required: false
-        default: "classical"
+          - blitz
+          - rapid
+          - classical
+          - antichess
+          - atomic
+          - chess960
+          - crazyhouse
+          - horde
+          - king-of-the-hill
+          - racing-kings
+          - three-check
       partitions:
         description: "Years, months, or ranges (e.g. 2013..2016, 2024, or 2025-01..2025-06)"
         type: string
@@ -45,8 +47,7 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       PYTHONUNBUFFERED: "1"
-      PRESET: ${{ github.event_name == 'workflow_dispatch' && inputs.preset || 'classical' }}
-      CUSTOM_CATEGORIES: ${{ github.event_name == 'workflow_dispatch' && inputs.custom_categories || '' }}
+      CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'classical' }}
       PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013' }}
       WARMUP_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
 
@@ -64,18 +65,15 @@ jobs:
 
       - name: Run Glicko-2 sweep
         run: |
-          case "$PRESET" in
+          case "$CATEGORY" in
             "standard (bullet blitz rapid classical)")
               CATEGORIES="bullet blitz rapid classical"
               ;;
             "variants (all 8 variants)")
               CATEGORIES="antichess atomic chess960 crazyhouse horde king-of-the-hill racing-kings three-check"
               ;;
-            "custom")
-              CATEGORIES="$CUSTOM_CATEGORIES"
-              ;;
             *)
-              CATEGORIES="$PRESET"
+              CATEGORIES="$CATEGORY"
               ;;
           esac
 
