@@ -2,7 +2,7 @@ import argparse
 import os
 import time
 import numpy as np
-from dataset_loader import CATEGORIES, expand_partitions, prepare_datasets, resolve_categories
+from dataset_loader import CATEGORIES, expand_partitions, list_available_partitions, prepare_datasets, resolve_categories
 from glicko2 import LILA_RATING_PERIOD_DAYS, active_numba_threads, load_encoded_games, sweep_rating_periods
 
 
@@ -60,6 +60,7 @@ if __name__ == "__main__":
         default=["classical"],
         help=f"One or more rating categories, or 'all' ({', '.join(['all', *CATEGORIES.keys()])})",
     )
+    parser.add_argument("--list-partitions", action="store_true", help="List available Hugging Face years/months for the selected categories and exit")
     parser.add_argument("--partitions", type=str, nargs="+", default=["2013"])
     parser.add_argument("--start-date", type=str, default=None)
     parser.add_argument("--end-date", type=str, default=None)
@@ -69,6 +70,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     categories = resolve_categories(args.category)
+    if args.list_partitions:
+        list_available_partitions(categories, hf_token=os.environ.get("HF_TOKEN"))
+        raise SystemExit(0)
+
     partitions = expand_partitions(args.partitions)
     print(f"Numba parallel worker threads: {active_numba_threads()}")
 

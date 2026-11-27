@@ -211,3 +211,29 @@ def prepare_datasets(
 
     return ready
 
+def list_available_partitions(categories: list[str], hf_token: str | None = None):
+    """Queries Hugging Face repo file trees and prints available years/months per unique dataset repo."""
+    api = HfApi(token=hf_token)
+    seen_repos: dict[str, list[str]] = defaultdict(list)
+    for cat in categories:
+        repo_id, _ = CATEGORIES[cat]
+        seen_repos[repo_id].append(cat)
+
+    for repo_id, cats in seen_repos.items():
+        repo_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
+        months_by_year: dict[str, set[str]] = defaultdict(set)
+        for path in repo_files:
+            if not path.startswith("data/year=") or not path.endswith(".parquet"):
+                continue
+            parts = path.split("/")
+            year = parts[1].removeprefix("year=")
+            month = parts[2].removeprefix("month=") if len(parts) > 2 and parts[2].startswith("month=") else None
+            if month:
+                months_by_year[year].add(month)
+
+        print(f"\n=== {repo_id} ({', '.join(cats)}) ===")
+        for year in sorted(months_by_year):
+            months = sorted(months_by_year[year])
+            status = "complete (01..12)" if len(months) == 12 else f"partial ({', '.join(months)})"
+            print(f"  {year}: {status}")
+
