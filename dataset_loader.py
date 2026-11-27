@@ -54,9 +54,6 @@ def prepare_datasets(
             print(f"Using cached Parquet file: {out_path}")
             ready[(cat, speed)] = (label, out_path)
             continue
-        if cat == "standard" and speed == "rapid" and all(int(p[:4]) <= 2017 for p in partitions):
-            print(f"  Skipping standard/rapid: 0 games exist before Dec 2, 2017 (partitions={partitions}).")
-            continue
         by_repo[CATEGORY_REPOS[cat]].append((cat, speed, label, out_path))
 
     if not by_repo:

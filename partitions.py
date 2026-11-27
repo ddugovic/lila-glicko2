@@ -18,7 +18,6 @@ VALID_SPEEDS = ["none", *STANDARD_SPEEDS]
 def speed_where_clause(speed: str) -> str:
     if speed == "none":
         return ""
-    cap = speed.capitalize()
     est_sec = (
         "(TRY_CAST(split_part(TimeControl, '+', 1) AS DOUBLE) "
         "+ 40.0 * COALESCE(TRY_CAST(split_part(TimeControl, '+', 2) AS DOUBLE), 0.0))"
@@ -29,7 +28,7 @@ def speed_where_clause(speed: str) -> str:
         "rapid": f"{est_sec} >= 480 AND {est_sec} < 1500",
         "classical": f"{est_sec} >= 1500",
     }[speed]
-    return f"AND (Event LIKE '%{cap}%' OR (TimeControl LIKE '%+%' AND {bounds}))"
+    return f"AND TimeControl LIKE '%+%' AND {bounds}"
 
 
 def resolve_targets(raw_categories: list[str], raw_speeds: list[str] | None) -> list[tuple[str, str]]:
