@@ -1,0 +1,69 @@
+name: Glicko-2 Sweep
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Dataset year (e.g. 2015, 2025)"
+        required: true
+        default: "2015"
+      months:
+        description: 'JSON array of months (e.g. ["01", "02", "03"])'
+        required: true
+        default: '["01"]'
+      speed:
+        description: "Time control pool (Bullet, Blitz, Rapid, Classical, All)"
+        required: true
+        default: "Classical"
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    outputs:
+      year: ${{ github.event_name == 'workflow_dispatch' && inputs.year || '2015' }}
+      months: ${{ github.event_name == 'workflow_dispatch' && inputs.months || '["01"]' }}
+      speed: ${{ github.event_name == 'workflow_dispatch' && inputs.speed || 'Classical' }}
+    steps:
+      - run: echo "Configured ${{ github.event_name }} sweep"
+
+  sweep:
+    needs: configure
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        month: ${{ fromJson(needs.configure.outputs.months) }}
+
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      YEAR: ${{ needs.configure.outputs.year }}
+      MONTH: ${{ matrix.month }}
+      SPEED: ${{ needs.configure.outputs.speed }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Glicko-2 sweep
+        run: |
+          python3 batch_sweep.py --year $YEAR --month $MONTH --speed $SPEED
+
+      - name: Upload sweep CSV artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: sweep-${{ env.YEAR }}-${{ env.MONTH }}-${{ env.SPEED }}
+          path: "*_sweep.csv"
+
