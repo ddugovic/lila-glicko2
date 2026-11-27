@@ -7,16 +7,33 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      category:
-        description: "Space-separated categories or 'all'"
+      preset:
+        description: "Quick category preset (select 'custom' to use the text box below)"
+        type: choice
         required: true
         default: "all"
+        options:
+          - all
+          - standard (bullet blitz rapid classical)
+          - variants (all 8 variants)
+          - classical
+          - rapid
+          - blitz
+          - bullet
+          - custom
+      custom_categories:
+        description: "Only used if preset=custom. Valid: bullet blitz rapid classical antichess atomic chess960 crazyhouse horde king-of-the-hill racing-kings three-check"
+        type: string
+        required: false
+        default: "classical"
       partitions:
-        description: "Years, months, or ranges (e.g. 2013..2016, 2013 2014, or 2018-01..2018-06)"
+        description: "Years, months, or ranges (e.g. 2013..2016, 2024, or 2025-01..2025-06)"
+        type: string
         required: true
-        default: "2013-01"
+        default: "2013"
       warmup_days:
-        description: "Optional warmup days (blank = default count warmup)"
+        description: "Optional warmup days (blank = default 10% up to 500k games)"
+        type: string
         required: false
         default: ""
 
@@ -28,8 +45,9 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       PYTHONUNBUFFERED: "1"
-      CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'all' }}
-      PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013-01' }}
+      PRESET: ${{ github.event_name == 'workflow_dispatch' && inputs.preset || 'classical' }}
+      CUSTOM_CATEGORIES: ${{ github.event_name == 'workflow_dispatch' && inputs.custom_categories || '' }}
+      PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013' }}
       WARMUP_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
 
     steps:
@@ -46,9 +64,24 @@ jobs:
 
       - name: Run Glicko-2 sweep
         run: |
-          echo "Event: ${{ github.event_name }} | Category: $CATEGORY | Partitions: $PARTITIONS | Warmup: ${WARMUP_DAYS:-default}"
+          case "$PRESET" in
+            "standard (bullet blitz rapid classical)")
+              CATEGORIES="bullet blitz rapid classical"
+              ;;
+            "variants (all 8 variants)")
+              CATEGORIES="antichess atomic chess960 crazyhouse horde king-of-the-hill racing-kings three-check"
+              ;;
+            "custom")
+              CATEGORIES="$CUSTOM_CATEGORIES"
+              ;;
+            *)
+              CATEGORIES="$PRESET"
+              ;;
+          esac
+
+          echo "Categories: $CATEGORIES | Partitions: $PARTITIONS | Warmup: ${WARMUP_DAYS:-default}"
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-            echo "**Run Config:** event=\`${{ github.event_name }}\`, category=\`$CATEGORY\`, partitions=\`$PARTITIONS\`, warmup=\`${WARMUP_DAYS:-default}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Run Config:** categories=\`$CATEGORIES\`, partitions=\`$PARTITIONS\`, warmup=\`${WARMUP_DAYS:-default}\`" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -56,7 +89,7 @@ jobs:
           if [ -n "$WARMUP_DAYS" ]; then
             WARMUP_ARG="--warmup-days $WARMUP_DAYS"
           fi
-          python3 batch_sweep.py --category $CATEGORY --partitions $PARTITIONS $WARMUP_ARG
+          python3 batch_sweep.py --category $CATEGORIES --partitions $PARTITIONS $WARMUP_ARG
 
       - name: Upload sweep CSV artifacts
         if: always()
