@@ -11,14 +11,10 @@ on:
         description: "Hugging Face dataset repo ID"
         required: true
         default: "Lichess/standard-chess-games"
-      year:
-        description: "Dataset year (e.g. 2015, 2025)"
+      partitions:
+        description: "Space-separated YYYY or YYYY-MM partitions (e.g. 2013-01 or 2015 2016)"
         required: true
-        default: "2015"
-      months:
-        description: "Space-separated months to stitch (e.g. 01 02 03)"
-        required: true
-        default: "01"
+        default: "2013"
       speed:
         description: "Space-separated speeds (e.g. Bullet Blitz Rapid Classical — leave blank for variants)"
         required: false
@@ -31,13 +27,12 @@ on:
 jobs:
   sweep:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
 
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.repo || 'Lichess/standard-chess-games' }}
-      YEAR: ${{ github.event_name == 'workflow_dispatch' && inputs.year || '2015' }}
-      MONTHS: ${{ github.event_name == 'workflow_dispatch' && inputs.months || '01' }}
+      PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013' }}
       SPEED: ${{ github.event_name == 'workflow_dispatch' && inputs.speed || 'Bullet Blitz Rapid Classical' }}
       WARMUP_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
 
@@ -61,18 +56,16 @@ jobs:
           fi
 
           if [ -z "$SPEED" ]; then
-            # Variant dataset (no speed filter)
-            python3 batch_sweep.py --repo "$REPO" --year "$YEAR" --months $MONTHS $WARMUP_ARG
+            python3 batch_sweep.py --repo "$REPO" --partitions $PARTITIONS $WARMUP_ARG
           else
-            # Standard chess: run each speed pool sequentially (reusing cached HF shards on disk)
             for S in $SPEED; do
-              python3 batch_sweep.py --repo "$REPO" --year "$YEAR" --months $MONTHS --speed "$S" $WARMUP_ARG
+              python3 batch_sweep.py --repo "$REPO" --partitions $PARTITIONS --speed "$S" $WARMUP_ARG
             done
           fi
 
       - name: Upload sweep CSV artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: sweep-${{ env.YEAR }}
+          name: sweep-results
           path: "*_sweep.csv"
 
