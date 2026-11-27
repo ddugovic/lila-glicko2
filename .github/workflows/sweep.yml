@@ -8,18 +8,14 @@ on:
   workflow_dispatch:
     inputs:
       category:
-        description: "Rating category or group preset to sweep"
+        description: "Game category (standard, variants, all, or a single variant)"
         type: choice
         required: true
         default: "all"
         options:
           - all
-          - standard (bullet blitz rapid classical)
-          - variants (all 8 variants)
-          - bullet
-          - blitz
-          - rapid
-          - classical
+          - standard
+          - variants
           - antichess
           - atomic
           - chess960
@@ -28,6 +24,18 @@ on:
           - king-of-the-hill
           - racing-kings
           - three-check
+      speed:
+        description: "Speed filter (use 'none' for unsplit variants, 'all' for all speeds)"
+        type: choice
+        required: true
+        default: "all"
+        options:
+          - all
+          - none
+          - bullet
+          - blitz
+          - rapid
+          - classical
       partitions:
         description: "Years, months, or ranges (e.g. 2013..2016, 2024, or 2025-01..2025-06)"
         type: string
@@ -47,7 +55,8 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       PYTHONUNBUFFERED: "1"
-      CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'classical' }}
+      CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'standard' }}
+      SPEED: ${{ github.event_name == 'workflow_dispatch' && inputs.speed || 'classical' }}
       PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013' }}
       WARMUP_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
 
@@ -65,21 +74,9 @@ jobs:
 
       - name: Run Glicko-2 sweep
         run: |
-          case "$CATEGORY" in
-            "standard (bullet blitz rapid classical)")
-              CATEGORIES="bullet blitz rapid classical"
-              ;;
-            "variants (all 8 variants)")
-              CATEGORIES="antichess atomic chess960 crazyhouse horde king-of-the-hill racing-kings three-check"
-              ;;
-            *)
-              CATEGORIES="$CATEGORY"
-              ;;
-          esac
-
-          echo "Categories: $CATEGORIES | Partitions: $PARTITIONS | Warmup: ${WARMUP_DAYS:-default}"
+          echo "Category: $CATEGORY | Speed: $SPEED | Partitions: $PARTITIONS | Warmup: ${WARMUP_DAYS:-default}"
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-            echo "**Run Config:** categories=\`$CATEGORIES\`, partitions=\`$PARTITIONS\`, warmup=\`${WARMUP_DAYS:-default}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Run Config:** category=\`$CATEGORY\`, speed=\`$SPEED\`, partitions=\`$PARTITIONS\`, warmup=\`${WARMUP_DAYS:-default}\`" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -87,7 +84,7 @@ jobs:
           if [ -n "$WARMUP_DAYS" ]; then
             WARMUP_ARG="--warmup-days $WARMUP_DAYS"
           fi
-          python3 batch_sweep.py --category $CATEGORIES --partitions $PARTITIONS $WARMUP_ARG
+          python3 batch_sweep.py --category $CATEGORY --speed $SPEED --partitions $PARTITIONS $WARMUP_ARG
 
       - name: Upload sweep CSV artifacts
         if: always()

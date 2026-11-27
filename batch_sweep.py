@@ -2,8 +2,9 @@ import argparse
 import os
 import time
 import numpy as np
-from dataset_loader import CATEGORIES, expand_partitions, list_available_partitions, prepare_datasets, resolve_categories
+from dataset_loader import list_available_partitions, prepare_datasets
 from glicko2 import LILA_RATING_PERIOD_DAYS, active_numba_threads, load_encoded_games, sweep_rating_periods
+from partitions import CATEGORY_REPOS, VALID_SPEEDS, expand_partitions, resolve_targets
 
 
 def run_sweep(
@@ -50,17 +51,11 @@ def run_sweep(
             f.write(f"| **Lila Baseline** | `{grid[lila_idx]:.3f}d` | `{log_losses[lila_idx]:.6f}` | `{brier_scores[lila_idx]:.6f}` |\n\n")
 
 
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download and stitch Lichess categories for Glicko-2 rating period sweep.")
-    parser.add_argument(
-        "--category",
-        type=str,
-        nargs="+",
-        default=["classical"],
-        help=f"One or more rating categories, or 'all' ({', '.join(['all', *CATEGORIES.keys()])})",
-    )
-    parser.add_argument("--list-partitions", action="store_true", help="List available Hugging Face years/months for the selected categories and exit")
+    parser = argparse.ArgumentParser(description="Download and stitch Lichess categories/speeds for Glicko-2 sweep.")
+    parser.add_argument("--category", type=str, nargs="+", default=["standard"], help=f"all, variants, {', '.join(CATEGORY_REPOS)}")
+    parser.add_argument("--list-partitions", action="store_true", help="List available Hugging Face years/months and exit")
+    parser.add_argument("--speed", type=str, nargs="+", default=None, help=f"all, {', '.join(VALID_SPEEDS)}")
     parser.add_argument("--partitions", type=str, nargs="+", default=["2013"])
     parser.add_argument("--start-date", type=str, default=None)
     parser.add_argument("--end-date", type=str, default=None)
@@ -69,9 +64,9 @@ if __name__ == "__main__":
     parser.add_argument("--summary", type=str, default=os.environ.get("GITHUB_STEP_SUMMARY"))
     args = parser.parse_args()
 
-    categories = resolve_categories(args.category)
+    targets = resolve_targets(args.category, args.speed)
     if args.list_partitions:
-        list_available_partitions(categories, hf_token=os.environ.get("HF_TOKEN"))
+        list_available_partitions(targets, hf_token=os.environ.get("HF_TOKEN"))
         raise SystemExit(0)
 
     partitions = expand_partitions(args.partitions)
@@ -88,26 +83,13 @@ if __name__ == "__main__":
 
     try:
         datasets = prepare_datasets(
-            categories=categories,
-            partitions=partitions,
-            part_tag=part_tag,
-            date_tag=date_tag,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            refresh=args.refresh,
-            hf_token=os.environ.get("HF_TOKEN"),
+            targets=targets, partitions=partitions, part_tag=part_tag, date_tag=date_tag,
+            start_date=args.start_date, end_date=args.end_date, refresh=args.refresh, hf_token=os.environ.get("HF_TOKEN"),
         )
-        for cat in categories:
-            if cat in datasets:
-                label, parquet_path = datasets[cat]
-                run_sweep(
-                    label,
-                    parquet_path,
-                    grid,
-                    warmup_days=args.warmup_days,
-                    summary_path=args.summary,
-                    csv_path=f"{label}_sweep.csv",
-                )
+        for target in targets:
+            if target in datasets:
+                label, parquet_path = datasets[target]
+                run_sweep(label, parquet_path, grid, warmup_days=args.warmup_days, summary_path=args.summary, csv_path=f"{label}_sweep.csv")
     except KeyboardInterrupt:
-        print("\nInterrupted; keeping results from completed categories.")
+        print("\nInterrupted; keeping results from completed sweeps.")
 
