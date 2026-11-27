@@ -112,6 +112,13 @@ def prepare_dataset(
         FROM '{out_path}'
     """).fetchone()
 
+    if summary[0] == 0:
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        hint = " (Lichess introduced Rapid on Dec 2, 2017)" if speed == "Rapid" and int(year) <= 2017 else ""
+        print(f"  Skipping {pool_desc}: 0 games matched in {repo_id} (year={year}, months={months}){hint}.")
+        return None
+
     print(
         f"  Saved {summary[0]:,} {pool_desc} games ({summary[1]} to {summary[2]}) "
         f"in {time.perf_counter() - t0:.2f}s"
@@ -132,7 +139,7 @@ def run_sweep(
     white_ids, black_ids, scores, days, n_players = load_encoded_games(path)
     print(f"Loaded {len(scores):,} games ({n_players:,} players) in {time.perf_counter() - t0:.2f}s")
 
-    if warmup_days is not None:
+    if warmup_days:
         warmup = int(np.searchsorted(days, days[0] + warmup_days))
         print(f"Using time-based warmup: {warmup_days:.1f} days ({warmup:,} games)")
     else:
@@ -214,19 +221,20 @@ if __name__ == "__main__":
         hf_token=os.environ.get("HF_TOKEN"),
     )
 
-    grid = np.unique(
-        np.concatenate([
-            np.linspace(0.75, 2.25, 13),
-            np.array([2.5, 3.0, 3.5, 4.0, LILA_RATING_PERIOD_DAYS, 5.0, 5.5, 6.0]),
-        ])
-    )
+    if parquet_path:
+        grid = np.unique(
+            np.concatenate([
+                np.linspace(0.75, 2.25, 13),
+                np.array([2.5, 3.0, 3.5, 4.0, LILA_RATING_PERIOD_DAYS, 6.0, 8.0, 10.0]),
+            ])
+        )
 
-    run_sweep(
-        label,
-        parquet_path,
-        grid,
-        warmup_days=args.warmup_days,
-        summary_path=args.summary,
-        csv_path=f"{label}_sweep.csv",
-    )
+        run_sweep(
+            label,
+            parquet_path,
+            grid,
+            warmup_days=args.warmup_days,
+            summary_path=args.summary,
+            csv_path=f"{label}_sweep.csv",
+        )
 
