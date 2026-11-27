@@ -23,10 +23,10 @@ def prepare_dataset(
     end_date: str | None = None,
     refresh: bool = False,
     hf_token: str | None = None,
-) -> str:
+) -> str | None:
     """
-    Downloads Parquet shards via hf_hub_download (1 resolver request per shard)
-    and extracts an isolated RD-tuning Parquet file.
+    Downloads and extracts one Parquet shard at a time (1 resolver request per shard),
+    deleting each raw shard immediately after extraction to stay within CI disk limits.
     """
     out_path = f"{label}_rd_tuning.parquet"
     if not refresh and os.path.exists(out_path):
@@ -44,25 +44,9 @@ def prepare_dataset(
             raise FileNotFoundError(f"No Parquet shards found under {prefix} in {repo_id}")
         shard_paths.extend(matched)
 
-    print(f"Fetching {len(shard_paths)} shard(s) via hf_hub_download...")
-    t0 = time.perf_counter()
-
-    local_shards: list[str] = []
-    for idx, rel_path in enumerate(shard_paths, 1):
-        print(f"  [{idx}/{len(shard_paths)}] {rel_path}")
-        local_file = hf_hub_download(
-            repo_id=repo_id,
-            repo_type="dataset",
-            filename=rel_path,
-            token=hf_token,
-        )
-        local_shards.append(local_file)
-
     con = duckdb.connect()
     con.execute("SET memory_limit = '10GB';")
     con.execute("SET temp_directory = '/tmp/duckdb_spill';")
-    con.execute("PRAGMA enable_progress_bar = true;")
-    con.execute("PRAGMA progress_bar_time = 0;")
 
     where_clauses = [
         "Result IN ('1-0', '0-1', '1/2-1/2')",
@@ -82,27 +66,61 @@ def prepare_dataset(
 
     where_sql = " AND ".join(where_clauses)
     pool_desc = speed or repo_id.split("/")[-1]
-    print(f"Extracting {pool_desc} -> {out_path}...")
+    print(f"Streaming {len(shard_paths)} shard(s) 1-by-1 for {pool_desc} -> {out_path}...")
+    t0 = time.perf_counter()
 
-    con.execute(f"""
-    COPY (
-        SELECT
-            White AS white,
-            Black AS black,
-            CASE Result
-                WHEN '1-0' THEN 1.0
-                WHEN '0-1' THEN 0.0
-                WHEN '1/2-1/2' THEN 0.5
-            END AS score,
-            epoch(UTCDate::DATE + UTCTime::TIME) AS timestamp,
-            WhiteElo AS white_elo,
-            BlackElo AS black_elo,
-            TimeControl AS time_control
-        FROM read_parquet({local_shards})
-        WHERE {where_sql}
-        ORDER BY UTCDate ASC, UTCTime ASC
-    ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-    """)
+    compact_parts: list[str] = []
+    try:
+        for idx, rel_path in enumerate(shard_paths, 1):
+            print(f"  [{idx}/{len(shard_paths)}] Downloading {rel_path}...")
+            local_raw = hf_hub_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                filename=rel_path,
+                token=hf_token,
+            )
+
+            part_path = f".tmp_{label}_part_{idx:04d}.parquet"
+            try:
+                con.execute(f"""
+                COPY (
+                    SELECT
+                        White AS white,
+                        Black AS black,
+                        CASE Result
+                            WHEN '1-0' THEN 1.0
+                            WHEN '0-1' THEN 0.0
+                            WHEN '1/2-1/2' THEN 0.5
+                        END AS score,
+                        epoch(UTCDate::DATE + UTCTime::TIME) AS timestamp,
+                        WhiteElo AS white_elo,
+                        BlackElo AS black_elo,
+                        TimeControl AS time_control
+                    FROM read_parquet('{local_raw}')
+                    WHERE {where_sql}
+                ) TO '{part_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                """)
+                compact_parts.append(part_path)
+            finally:
+                # Resolve symlink to the actual blob in HF cache and delete both to free SSD immediately
+                real_blob = os.path.realpath(local_raw)
+                if os.path.exists(local_raw):
+                    os.remove(local_raw)
+                if os.path.exists(real_blob):
+                    os.remove(real_blob)
+
+        # Merge and sort all compact parts chronologically into the final Parquet file
+        con.execute(f"""
+        COPY (
+            SELECT *
+            FROM read_parquet({compact_parts})
+            ORDER BY timestamp ASC
+        ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+        """)
+    finally:
+        for p in compact_parts:
+            if os.path.exists(p):
+                os.remove(p)
 
     summary = con.execute(f"""
         SELECT
