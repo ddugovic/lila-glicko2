@@ -53,6 +53,7 @@ jobs:
           python3 batch_sweep.py --category $CATEGORY --partitions $PARTITIONS $WARMUP_ARG
 
       - name: Upload sweep CSV artifacts
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: sweep-results

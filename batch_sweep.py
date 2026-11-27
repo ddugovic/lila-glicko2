@@ -73,17 +73,20 @@ if __name__ == "__main__":
         np.array([2.5, 3.0, 3.5, 4.0, LILA_RATING_PERIOD_DAYS, 5.0, 5.5, 6.0]),
     ]))
 
-    for cat in categories:
-        label = f"{cat.replace('-', '_')}_{part_tag}{date_tag}"
-        parquet_path = prepare_dataset(
-            category=cat,
-            partitions=args.partitions,
-            label=label,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            refresh=args.refresh,
-            hf_token=os.environ.get("HF_TOKEN"),
-        )
-        if parquet_path:
-            run_sweep(label, parquet_path, grid, warmup_days=args.warmup_days, summary_path=args.summary, csv_path=f"{label}_sweep.csv")
+    try:
+        for cat in categories:
+            label = f"{cat.replace('-', '_')}_{part_tag}{date_tag}"
+            parquet_path = prepare_dataset(
+                category=cat,
+                partitions=args.partitions,
+                label=label,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                refresh=args.refresh,
+                hf_token=os.environ.get("HF_TOKEN"),
+            )
+            if parquet_path:
+                run_sweep(label, parquet_path, grid, warmup_days=args.warmup_days, summary_path=args.summary, csv_path=f"{label}_sweep.csv")
+    except KeyboardInterrupt:
+        print("\nInterrupted; keeping results from completed categories.")
 
