@@ -117,8 +117,8 @@ if __name__ == "__main__":
 
     targets = resolve_targets(args.category, args.speed)
     partitions = expand_partitions(args.partitions)
-    first_part, *_, last_part = partitions if len(partitions) > 1 else (partitions.pop(), partitions[-1])
-    part_tag = first_part if first_part == last_part else f"{first_part}-to-{last_part}"
+    first_part = next(iter(partitions))
+    part_tag = first_part if len(partitions) == 1 else f"{first_part}-to-{partitions[-1]}"
 
     if args.summary:
         with open(summary_path := args.summary, "a", encoding="utf-8") as f:
