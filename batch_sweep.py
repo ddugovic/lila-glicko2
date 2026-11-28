@@ -3,6 +3,7 @@ import math
 import os
 import time
 import numpy as np
+from benchmark import estimate_sweep_seconds, format_duration
 from dataset_loader import list_available_partitions, prepare_datasets
 from glicko2 import (
     LILA_RATING_PERIOD_DAYS,
@@ -64,7 +65,9 @@ def run_sweep(
     print(f"Loaded {len(scores):,} games ({n_players:,} players) in {time.perf_counter() - t0:.2f}s")
 
     warmup = int(np.searchsorted(days, days + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
-    print(f"Warmup: {warmup:,} games | Min idle filter: {min_idle_days:.2f}d | Rankable RD <= {rankable_rd:.0f}")
+    est_sec = estimate_sweep_seconds(white_ids, black_ids, scores, days, n_players, len(grid), rankable_rd)
+    print(f"Warmup: {warmup:,} games | Min idle filter: {min_idle_days:.2f}d | Rankable RD <= {rankable_rd:.0f} | Est. sweep: ~{format_duration(est_sec)}")
+
 
     t1 = time.perf_counter()
     metrics, counts = sweep_rating_periods(
