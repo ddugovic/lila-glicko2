@@ -1,0 +1,88 @@
+name: Derive ColorAdvantage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      category:
+        description: "Category (variants, all, standard, or a specific repo)"
+        required: true
+        default: "all"
+      speed:
+        description: "Speed filter (default, all, bullet, blitz, rapid, classical, correspondence)"
+        required: true
+        default: "default"
+      partitions:
+        description: "Year(s) or range (e.g., 2018 or 2018..2022)"
+        required: true
+        default: "2013"
+      warmup_days:
+        description: "Optional warmup window in days (leave blank for default)"
+        required: false
+        default: ""
+
+jobs:
+  tune-variant:
+    if: ${{ (github.event.inputs.category || 'variants') != 'standard' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        variant:
+          - antichess
+          - atomic
+          - chess960
+          - crazyhouse
+          - horde
+          - king-of-the-hill
+          - racing-kings
+          - three-check
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+      - run: pip install -r requirements.txt
+      - name: Optimize ColorAdvantage for ${{ matrix.variant }}
+        if: ${{ (github.event.inputs.category || 'variants') == 'all' || (github.event.inputs.category || 'variants') == 'variants' || (github.event.inputs.category || 'variants') == matrix.variant }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          ARGS=(--category "${{ matrix.variant }}" --partitions ${{ github.event.inputs.partitions || '2018' }})
+          if [ "${{ github.event.inputs.speed }}" != "default" ]; then
+            ARGS+=(--speed "${{ github.event.inputs.speed }}")
+          fi
+          if [ -n "${{ github.event.inputs.warmup_days }}" ]; then
+            ARGS+=(--warmup-days "${{ github.event.inputs.warmup_days }}")
+          fi
+          python3 tune_color_adv.py "${ARGS[@]}"
+
+  tune-standard:
+    if: ${{ (github.event.inputs.category || 'variants') == 'all' || (github.event.inputs.category || 'variants') == 'standard' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+      - run: pip install -r requirements.txt
+      - name: Optimize ColorAdvantage for standard
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          SPEED="${{ github.event.inputs.speed || 'default' }}"
+          if [ "$SPEED" = "default" ]; then SPEED="all"; fi
+          ARGS=(--category standard --speed "$SPEED" --partitions ${{ github.event.inputs.partitions || '2018' }})
+          if [ -n "${{ github.event.inputs.warmup_days }}" ]; then
+            ARGS+=(--warmup-days "${{ github.event.inputs.warmup_days }}")
+          fi
+          python3 tune_color_adv.py "${ARGS[@]}"
+
