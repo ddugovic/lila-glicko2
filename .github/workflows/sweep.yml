@@ -25,13 +25,13 @@ on:
           - racing-kings
           - three-check
       speed:
-        description: "Speed filter (use 'none' for unsplit real-time variants, 'all' for all speeds)"
+        description: "Speed filter (use 'realtime' for unsplit real-time variants, 'all' for all speeds)"
         type: choice
         required: true
-        default: "all"
+        default: "realtime"
         options:
+          - realtime
           - all
-          - none
           - bullet
           - blitz
           - rapid
@@ -56,8 +56,8 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       PYTHONUNBUFFERED: "1"
-      CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'standard' }}
-      SPEED: ${{ github.event_name == 'workflow_dispatch' && inputs.speed || 'classical' }}
+      CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'all' }}
+      SPEED: ${{ github.event_name == 'workflow_dispatch' && inputs.speed || 'all' }}
       PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013' }}
       WARMUP_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
 

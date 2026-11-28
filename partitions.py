@@ -12,11 +12,11 @@ CATEGORY_REPOS: dict[str, str] = {
 
 VARIANT_CATEGORIES = [c for c in CATEGORY_REPOS if c != "standard"]
 STANDARD_SPEEDS = ["bullet", "blitz", "rapid", "classical", "correspondence"]
-VALID_SPEEDS = ["none", *STANDARD_SPEEDS]
+VALID_SPEEDS = ["realtime", *STANDARD_SPEEDS]
 
 
 def speed_where_clause(speed: str) -> str:
-    if speed == "none":
+    if speed == "realtime":
         return "AND Event NOT LIKE '%Correspondence%' AND TimeControl != '-'"
     if speed == "correspondence":
         return "AND (Event LIKE '%Correspondence%' OR TimeControl = '-')"
@@ -62,7 +62,7 @@ def resolve_targets(raw_categories: list[str], raw_speeds: list[str] | None) -> 
     if raw_speeds:
         for item in raw_speeds:
             for raw in item.split(","):
-                key = raw.strip().lower()
+                key = raw.strip().lower().replace("real-time", "realtime")
                 if not key:
                     continue
                 if key == "all":
@@ -76,11 +76,11 @@ def resolve_targets(raw_categories: list[str], raw_speeds: list[str] | None) -> 
     targets: list[tuple[str, str]] = list(implicit_targets)
     for cat in cats:
         if cat == "standard":
-            for s in ([s for s in speeds if s != "none"] or STANDARD_SPEEDS):
+            for s in ([s for s in speeds if s != "realtime"] or STANDARD_SPEEDS):
                 if (cat, s) not in targets:
                     targets.append((cat, s))
         else:
-            for s in (speeds or ["none"]):
+            for s in (speeds or ["realtime"]):
                 if (cat, s) not in targets:
                     targets.append((cat, s))
     return targets
@@ -133,6 +133,6 @@ def resolve_partition_prefixes(partitions: list[str]) -> list[str]:
 
 def make_label(category: str, speed: str, part_tag: str, date_tag: str) -> str:
     cat_slug = category.replace("-", "_")
-    base = speed if category == "standard" else (cat_slug if speed == "none" else f"{cat_slug}_{speed}")
+    base = speed if category == "standard" else (cat_slug if speed == "realtime" else f"{cat_slug}_{speed}")
     return f"{base}_{part_tag}{date_tag}"
 
