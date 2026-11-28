@@ -32,6 +32,7 @@ on:
         options:
           - realtime
           - all
+          - ultrabullet
           - bullet
           - blitz
           - rapid

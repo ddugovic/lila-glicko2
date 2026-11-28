@@ -11,7 +11,7 @@ CATEGORY_REPOS: dict[str, str] = {
 }
 
 VARIANT_CATEGORIES = [c for c in CATEGORY_REPOS if c != "standard"]
-STANDARD_SPEEDS = ["bullet", "blitz", "rapid", "classical", "correspondence"]
+STANDARD_SPEEDS = ["ultrabullet", "bullet", "blitz", "rapid", "classical", "correspondence"]
 VALID_SPEEDS = ["realtime", *STANDARD_SPEEDS]
 COLOR_ADV_ELO: dict[str, float] = {
     "standard": 11.782457,
@@ -29,7 +29,8 @@ def speed_where_clause(speed: str) -> str:
         "(TRY_CAST(split_part(TimeControl, '+', 1) AS DOUBLE) + 40.0 * COALESCE(TRY_CAST(split_part(TimeControl, '+', 2) AS DOUBLE), 0.0))"
     )
     bounds = {
-        "bullet": f"{est_sec} < 180",
+        "ultrabullet": f"{est_sec} < 30",
+        "bullet": f"{est_sec} >= 30 AND {est_sec} < 180",
         "blitz": f"{est_sec} >= 180 AND {est_sec} < 480",
         "rapid": f"{est_sec} >= 480 AND {est_sec} < 1500",
         "classical": f"{est_sec} >= 1500",

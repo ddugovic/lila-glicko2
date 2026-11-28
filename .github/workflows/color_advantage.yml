@@ -8,7 +8,7 @@ on:
         required: true
         default: "all"
       speed:
-        description: "Speed filter (default, all, bullet, blitz, rapid, classical, correspondence)"
+        description: "Speed filter (default, all, ultrabullet, bullet, blitz, rapid, classical, correspondence)"
         required: true
         default: "default"
       partitions:

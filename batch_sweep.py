@@ -134,7 +134,7 @@ if __name__ == "__main__":
             if (cat, speed) in datasets:
                 label, parquet_path = datasets[(cat, speed)]
                 rankable_rd = STANDARD_RANKABLE_RD if cat == "standard" else VARIANT_RANKABLE_RD
-                default_adv = COLOR_ADV_ELO.get(cat, 0.0)
+                default_adv = COLOR_ADV_ELO.get(speed, COLOR_ADV_ELO.get(cat, 0.0))
                 white_adv = args.white_adv_elo if args.white_adv_elo is not None else default_adv
                 run_sweep(
                     label,
