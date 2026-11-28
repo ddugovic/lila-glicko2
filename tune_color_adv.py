@@ -25,7 +25,11 @@ def optimize_color_advantage(
 ):
     white_ids, black_ids, scores, days, n_players = load_encoded_games(parquet_path)
     warmup = int(days.searchsorted(days[0] + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
-    eval_games = max(0, len(scores) - warmup)
+    eval_scores = scores[warmup:]
+    w_cnt = int((eval_scores == 1.0).sum())
+    d_cnt = int((eval_scores == 0.5).sum())
+    l_cnt = int((eval_scores == 0.0).sum())
+    wdl_str = f"{w_cnt:,} / {d_cnt:,} / {l_cnt:,}"
 
     ref_rd_w, ref_rd_b, est_n, rank_n = compute_reference_rds(
         white_ids,
@@ -100,7 +104,7 @@ def optimize_color_advantage(
         rank_lk_str = f"`{best_rank_lk:.6f}d` ({rank_n:,})" if rank_n > 0 else "—"
         with open(summary_path, "a", encoding="utf-8") as f:
             f.write(
-                f"| `{name}` | {eval_games:,} | `{best_all:.6f}d` | {est_str} | {rank_str} | "
+                f"| `{name}` | {wdl_str} | `{best_all:.6f}d` | {est_str} | {rank_str} | "
                 f"{est_lk_str} | {rank_lk_str} | "
                 f"`{ll_zero:.6f}` -> `{ll_best:.6f}` | `{bs_zero:.6f}` -> `{bs_best:.6f}` |\n"
             )
@@ -130,7 +134,7 @@ if __name__ == "__main__":
         with open(args.summary, "a", encoding="utf-8") as f:
             f.write(f"## Glicko-2 ColorAdvantage Derivation (`{part_tag}`)\n\n")
             f.write(
-                "| Dataset | Eval Games | All Games `ColorAdvantage` | Established (Top) | "
+                "| Dataset | W / D / L | All Games `ColorAdvantage` | Established (Top) | "
                 "Rankable (Top) | Established (Locked) | Rankable (Locked) | "
                 "Log-Loss (`0` -> Optimal) | Brier (`0` -> Optimal) |\n"
             )
