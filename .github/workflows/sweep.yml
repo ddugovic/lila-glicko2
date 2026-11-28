@@ -85,33 +85,55 @@ jobs:
           name: sweep-results-standard
           path: "*_sweep.csv"
 
-  sweep-variants:
+  sweep-variant:
     if: ${{ (github.event.inputs.category || 'all') != 'standard' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - antichess
+          - atomic
+          - chess960
+          - crazyhouse
+          - horde
+          - king-of-the-hill
+          - racing-kings
+          - three-check
     steps:
+      - name: Check if matrix variant is selected
+        id: filter
+        run: |
+          if [ "$CATEGORY" = "all" ] || [ "$CATEGORY" = "variants" ] || [ "$CATEGORY" = "${{ matrix.variant }}" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v6
+        if: steps.filter.outputs.run == 'true'
       - uses: actions/setup-python@v6
+        if: steps.filter.outputs.run == 'true'
         with:
           python-version: "3.11"
           cache: "pip"
           cache-dependency-path: "requirements.txt"
-      - run: pip install -r requirements.txt
-      - name: Run variants sweep
+      - if: steps.filter.outputs.run == 'true'
+        run: pip install -r requirements.txt
+      - name: Run ${{ matrix.variant }} sweep
+        if: steps.filter.outputs.run == 'true'
         run: |
-          VAR_CAT="$CATEGORY"
-          [ "$CATEGORY" = "all" ] && VAR_CAT="variants"
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-            echo "**Run Config (Variants):** category=\`$VAR_CAT\`, speed=\`$SPEED\`, partitions=\`$PARTITIONS\`, warmup=\`${WARMUP_DAYS:-default}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Run Config (${{ matrix.variant }}):** speed=\`$SPEED\`, partitions=\`$PARTITIONS\`, warmup=\`${WARMUP_DAYS:-default}\`" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           fi
           WARMUP_ARG=""
           [ -n "$WARMUP_DAYS" ] && WARMUP_ARG="--warmup-days $WARMUP_DAYS"
-          python3 batch_sweep.py --category $VAR_CAT --speed $SPEED --partitions $PARTITIONS $WARMUP_ARG
-      - name: Upload variants CSVs
-        if: always()
+          python3 batch_sweep.py --category ${{ matrix.variant }} --speed $SPEED --partitions $PARTITIONS $WARMUP_ARG
+      - name: Upload ${{ matrix.variant }} CSVs
+        if: always() && steps.filter.outputs.run == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: sweep-results-variants
+          name: sweep-results-${{ matrix.variant }}
           path: "*_sweep.csv"
 
