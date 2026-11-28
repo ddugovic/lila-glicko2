@@ -3,19 +3,20 @@ import numpy as np
 from numba import njit
 
 # Exact constants from lila (lichess)
-GLICKO2_SCALE = 173.7178           # 400 / ln(10)
+GLICKO2_SCALE = 173.7178               # 400 / ln(10)
 INIT_RATING = 1500.0
 MIN_RATING = 400.0
 MAX_RATING = 4000.0
 
 MIN_RD = 45.0
-MAX_RD = 500.0                     # lila: maxDeviation = 500d
-PROVISIONAL_RD = 110.0             # lila: ? mark threshold
-STANDARD_RANKABLE_RD = 75.0        # lila: standardRankableDeviation = 75
-VARIANT_RANKABLE_RD = 65.0         # lila: variantRankableDeviation = 65
-INIT_VOL = 0.09                    # lila: defaultVolatility = 0.09d
-MAX_VOL = 0.1                      # lila: maxVolatility = 0.1d
-TAU = 0.75                         # lila system constant
+MAX_RD = 500.0                         # lila: maxDeviation = 500d
+PROVISIONAL_RD = 110.0                 # lila: ? mark threshold
+STANDARD_RANKABLE_RD = 75.0            # lila: standardRankableDeviation = 75
+VARIANT_RANKABLE_RD = 65.0             # lila: variantRankableDeviation = 65
+STANDARD_COLOR_ADV_ELO = 11.782457     # lila: ColorAdvantage.standard = 11.782457d
+INIT_VOL = 0.09                        # lila: defaultVolatility = 0.09d
+MAX_VOL = 0.1                          # lila: maxVolatility = 0.1d
+TAU = 0.75                             # lila system constant
 EPSILON = 1e-6
 LILA_RATING_PERIOD_DAYS = 1.0 / 0.21436  # ~4.66505 days
 
@@ -149,12 +150,13 @@ def evaluate_rating_period(
     n_players: int,
     rating_period_days: float = LILA_RATING_PERIOD_DAYS,
     rankable_rd: float = STANDARD_RANKABLE_RD,
+    white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
     tau: float = TAU,
     warmup_games: int = 500_000,
     min_idle_days: float = 0.0,
 ):
     """
-    Simulate full game stream and return:
+    Simulate full game stream with White color advantage and return:
     (game_ll, game_bs, all_p_ll, all_p_bs, prov_ll, prov_bs, est_ll, est_bs, rank_ll, rank_bs,
      eval_games, all_p_cnt, prov_cnt, est_cnt, rank_cnt).
     """
@@ -162,6 +164,7 @@ def evaluate_rating_period(
     max_mu = (MAX_RATING - INIT_RATING) / GLICKO2_SCALE
     max_phi = MAX_RD / GLICKO2_SCALE
     min_phi = MIN_RD / GLICKO2_SCALE
+    white_adv_mu = white_adv_elo / GLICKO2_SCALE
 
     mus = np.zeros(n_players, dtype=np.float64)
     phis = np.full(n_players, max_phi, dtype=np.float64)
@@ -204,7 +207,7 @@ def evaluate_rating_period(
         phi_star_b = age_phi(phis[b], sigma_b, dt_b, rating_period_days, max_phi) if dt_b >= 0.0 else max_phi
 
         phi_comb = math.sqrt(phi_star_w * phi_star_w + phi_star_b * phi_star_b)
-        e_pred = expected_score(mu_w, mu_b, phi_comb)
+        e_pred = expected_score(mu_w + white_adv_mu, mu_b, phi_comb)
 
         if i >= warmup_games:
             qualifies = True if min_idle_days <= 0.0 else ((dt_w >= min_idle_days) or (dt_b >= min_idle_days))
@@ -226,7 +229,7 @@ def evaluate_rating_period(
                 all_bs_sum[b] += game_bs
                 all_cnt[b] += 1
 
-                # White RD cohorts (lila: provisional >= 110, established < 110, rankable <= 75 / 65)
+                # White RD cohorts
                 rd_w = phi_star_w * GLICKO2_SCALE
                 if rd_w >= PROVISIONAL_RD:
                     prov_ll_sum[w] += game_ll
@@ -257,10 +260,10 @@ def evaluate_rating_period(
                         rank_cnt[b] += 1
 
         new_mu_w, new_phi_w, new_sigma_w = update_player_m1(
-            mu_w, phi_star_w, sigma_w, mu_b, phi_star_b, s_w, tau, min_phi, min_mu, max_mu
+            mu_w, phi_star_w, sigma_w, mu_b - white_adv_mu, phi_star_b, s_w, tau, min_phi, min_mu, max_mu
         )
         new_mu_b, new_phi_b, new_sigma_b = update_player_m1(
-            mu_b, phi_star_b, sigma_b, mu_w, phi_star_w, 1.0 - s_w, tau, min_phi, min_mu, max_mu
+            mu_b, phi_star_b, sigma_b, mu_w + white_adv_mu, phi_star_w, 1.0 - s_w, tau, min_phi, min_mu, max_mu
         )
 
         mus[w], phis[w], sigmas[w], last_played[w] = new_mu_w, new_phi_w, new_sigma_w, t

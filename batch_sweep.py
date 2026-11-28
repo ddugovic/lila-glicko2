@@ -7,6 +7,7 @@ from benchmark import estimate_sweep_seconds, format_duration
 from dataset_loader import list_available_partitions, prepare_datasets
 from glicko2 import (
     LILA_RATING_PERIOD_DAYS,
+    STANDARD_COLOR_ADV_ELO,
     STANDARD_RANKABLE_RD,
     VARIANT_RANKABLE_RD,
     active_numba_threads,
@@ -53,6 +54,7 @@ def run_sweep(
     path: str,
     grid: np.ndarray,
     rankable_rd: float = STANDARD_RANKABLE_RD,
+    white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
     warmup_days: float | None = None,
     min_idle_days: float = 0.0,
     summary_path: str | None = None,
@@ -66,13 +68,15 @@ def run_sweep(
 
     warmup = int(np.searchsorted(days, days + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
     est_sec = estimate_sweep_seconds(white_ids, black_ids, scores, days, n_players, len(grid), rankable_rd)
-    print(f"Warmup: {warmup:,} games | Min idle filter: {min_idle_days:.2f}d | Rankable RD <= {rankable_rd:.0f} | Est. sweep: ~{format_duration(est_sec)}")
-
+    print(
+        f"Warmup: {warmup:,} games | Min idle: {min_idle_days:.2f}d | Rankable RD <= {rankable_rd:.0f} "
+        f"| White adv: +{white_adv_elo:.2f} Elo | Est. sweep: ~{format_duration(est_sec)}"
+    )
 
     t1 = time.perf_counter()
     metrics, counts = sweep_rating_periods(
         white_ids, black_ids, scores, days, n_players, grid,
-        rankable_rd=rankable_rd, warmup_games=warmup, min_idle_days=min_idle_days,
+        rankable_rd=rankable_rd, white_adv_elo=white_adv_elo, warmup_games=warmup, min_idle_days=min_idle_days,
     )
     elapsed = time.perf_counter() - t1
     lila_idx = int(np.argmin(np.abs(grid - LILA_RATING_PERIOD_DAYS)))
@@ -111,7 +115,7 @@ def run_sweep(
     if summary_path:
         idle_note = f", min_idle={min_idle_days:.1f}d" if min_idle_days > 0 else ""
         with open(summary_path, "a", encoding="utf-8") as f:
-            f.write(f"### Glicko-2 Sweep: `{name}` (warmup={warmup:,}{idle_note})\n\n")
+            f.write(f"### Glicko-2 Sweep: `{name}` (warmup={warmup:,}, white_adv=+{white_adv_elo:.2f} Elo{idle_note})\n\n")
             for idx_c, (title, ll_col, bs_col, cnt_col) in enumerate(cohorts):
                 unit_label = "games" if idx_c == 0 else "players"
                 _write_ranked_table(
@@ -129,6 +133,7 @@ if __name__ == "__main__":
     parser.add_argument("--end-date", type=str, default=None)
     parser.add_argument("--warmup-days", type=float, default=None)
     parser.add_argument("--min-idle-days", type=float, default=0.0)
+    parser.add_argument("--white-adv-elo", type=float, default=None, help="Override White advantage in Elo (default: 11.782457 for standard, 0.0 for variants)")
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--list-partitions", action="store_true")
     parser.add_argument("--summary", type=str, default=os.environ.get("GITHUB_STEP_SUMMARY"))
@@ -157,9 +162,12 @@ if __name__ == "__main__":
             if (cat, speed) in datasets:
                 label, parquet_path = datasets[(cat, speed)]
                 rankable_rd = STANDARD_RANKABLE_RD if cat == "standard" else VARIANT_RANKABLE_RD
+                default_adv = STANDARD_COLOR_ADV_ELO if cat == "standard" else 0.0
+                white_adv = args.white_adv_elo if args.white_adv_elo is not None else default_adv
                 run_sweep(
-                    label, parquet_path, grid, rankable_rd=rankable_rd, warmup_days=args.warmup_days,
-                    min_idle_days=args.min_idle_days, summary_path=args.summary, csv_path=f"{label}_sweep.csv",
+                    label, parquet_path, grid, rankable_rd=rankable_rd, white_adv_elo=white_adv,
+                    warmup_days=args.warmup_days, min_idle_days=args.min_idle_days,
+                    summary_path=args.summary, csv_path=f"{label}_sweep.csv",
                 )
     except KeyboardInterrupt:
         print("\nInterrupted; keeping results from completed sweeps.")

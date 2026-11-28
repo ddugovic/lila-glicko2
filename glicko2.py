@@ -3,6 +3,7 @@ import numpy as np
 from numba import get_num_threads, njit, prange
 from glicko2_math import (
     LILA_RATING_PERIOD_DAYS,
+    STANDARD_COLOR_ADV_ELO,
     STANDARD_RANKABLE_RD,
     TAU,
     VARIANT_RANKABLE_RD,
@@ -57,6 +58,7 @@ def sweep_rating_periods(
     n_players: int,
     period_days_grid: np.ndarray,
     rankable_rd: float = STANDARD_RANKABLE_RD,
+    white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
     tau: float = TAU,
     warmup_games: int = 500_000,
     min_idle_days: float = 0.0,
@@ -82,6 +84,7 @@ def sweep_rating_periods(
             n_players,
             rating_period_days=period_days_grid[idx],
             rankable_rd=rankable_rd,
+            white_adv_elo=white_adv_elo,
             tau=tau,
             warmup_games=warmup_games,
             min_idle_days=min_idle_days,
