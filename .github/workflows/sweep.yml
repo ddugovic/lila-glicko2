@@ -58,7 +58,7 @@ env:
 
 jobs:
   sweep-standard:
-    if: ${{ (github.event.inputs.category || 'standard') == 'all' || (github.event.inputs.category || 'standard') == 'standard' }}
+    if: ${{ (github.event.inputs.category || 'all') == 'all' || (github.event.inputs.category || 'all') == 'standard' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -86,7 +86,7 @@ jobs:
           path: "*_sweep.csv"
 
   sweep-variants:
-    if: ${{ (github.event.inputs.category || 'standard') != 'standard' }}
+    if: ${{ (github.event.inputs.category || 'all') != 'standard' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
