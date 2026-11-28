@@ -1,10 +1,19 @@
 import argparse
+import math
 import os
 import time
 import numpy as np
 from dataset_loader import list_available_partitions, prepare_datasets
 from glicko2 import LILA_RATING_PERIOD_DAYS, active_numba_threads, load_encoded_games, sweep_rating_periods
 from partitions import CATEGORY_REPOS, STANDARD_SPEEDS, VALID_SPEEDS, expand_partitions, resolve_targets
+
+
+def delta_log_loss_to_elo(delta_ll: float) -> float:
+    """Converts excess log-loss (nats/game) into equivalent RMS Elo rating error."""
+    if delta_ll <= 0.0:
+        return 0.0
+    scale = 400.0 / math.log(10.0)
+    return scale * math.sqrt(2.0 * delta_ll)
 
 
 def run_sweep(
@@ -32,37 +41,40 @@ def run_sweep(
     best_idx = int(np.argmin(log_losses))
     best_bs_idx = int(np.argmin(brier_scores))
     lila_idx = int(np.argmin(np.abs(grid - LILA_RATING_PERIOD_DAYS)))
+    best_ll = float(log_losses[best_idx])
 
     print(f"Swept {len(grid)} values in {elapsed:.2f}s ({elapsed / len(grid):.3f}s/run)")
     for rank, idx in enumerate(ranked_indices[:top_k], 1):
         tag = " [Lila]" if idx == lila_idx else ""
-        print(f"  #{rank}: period={grid[idx]:.3f}d -> log_loss={log_losses[idx]:.6f}, brier={brier_scores[idx]:.6f}{tag}")
+        d_elo = delta_log_loss_to_elo(float(log_losses[idx]) - best_ll)
+        print(f"  #{rank}: period={grid[idx]:.3f}d -> log_loss={log_losses[idx]:.6f}, brier={brier_scores[idx]:.6f} (+{d_elo:.2f} Elo){tag}")
     print(f"  Best Brier: period={grid[best_bs_idx]:.3f}d -> log_loss={log_losses[best_bs_idx]:.6f}, brier={brier_scores[best_bs_idx]:.6f}")
     if lila_idx not in ranked_indices[:top_k]:
-        print(f"  Lila Base : period={grid[lila_idx]:.3f}d -> log_loss={log_losses[lila_idx]:.6f}, brier={brier_scores[lila_idx]:.6f}")
+        d_elo = delta_log_loss_to_elo(float(log_losses[lila_idx]) - best_ll)
+        print(f"  Lila Base : period={grid[lila_idx]:.3f}d -> log_loss={log_losses[lila_idx]:.6f}, brier={brier_scores[lila_idx]:.6f} (+{d_elo:.2f} Elo)")
 
     if csv_path:
         with open(csv_path, "w", encoding="utf-8") as f:
-            f.write("dataset,period_days,log_loss,brier_score\n")
+            f.write("dataset,period_days,log_loss,brier_score,delta_elo\n")
             for p, ll, bs in zip(grid, log_losses, brier_scores):
-                f.write(f"{name},{p:.6f},{ll:.8f},{bs:.8f}\n")
+                d_elo = delta_log_loss_to_elo(float(ll) - best_ll)
+                f.write(f"{name},{p:.6f},{ll:.8f},{bs:.8f},{d_elo:.4f}\n")
 
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as f:
             f.write(f"### Glicko-2 Sweep: `{name}` ({len(scores):,} games, {n_players:,} players, warmup={warmup:,})\n\n")
-            f.write("| Rank / Benchmark | Rating Period (days) | Log-Loss | Brier | Δ Log-Loss vs. Best |\n")
+            f.write("| Rank / Benchmark | Rating Period (days) | Log-Loss | Brier | Δ Elo vs. Best |\n")
             f.write("| :--- | :---: | :---: | :---: | :---: |\n")
-            best_ll = log_losses[best_idx]
             for rank, idx in enumerate(ranked_indices[:top_k], 1):
                 label = f"**#{rank}**" + (" (Lila Baseline)" if idx == lila_idx else "")
-                delta = log_losses[idx] - best_ll
-                f.write(f"| {label} | `{grid[idx]:.3f}d` | `{log_losses[idx]:.6f}` | `{brier_scores[idx]:.6f}` | `+{delta:.6f}` |\n")
+                d_elo = delta_log_loss_to_elo(float(log_losses[idx]) - best_ll)
+                f.write(f"| {label} | `{grid[idx]:.3f}d` | `{log_losses[idx]:.6f}` | `{brier_scores[idx]:.6f}` | `+{d_elo:.2f} Elo` |\n")
             if best_bs_idx not in ranked_indices[:top_k]:
-                delta = log_losses[best_bs_idx] - best_ll
-                f.write(f"| **Best Brier** | `{grid[best_bs_idx]:.3f}d` | `{log_losses[best_bs_idx]:.6f}` | `{brier_scores[best_bs_idx]:.6f}` | `+{delta:.6f}` |\n")
+                d_elo = delta_log_loss_to_elo(float(log_losses[best_bs_idx]) - best_ll)
+                f.write(f"| **Best Brier** | `{grid[best_bs_idx]:.3f}d` | `{log_losses[best_bs_idx]:.6f}` | `{brier_scores[best_bs_idx]:.6f}` | `+{d_elo:.2f} Elo` |\n")
             if lila_idx not in ranked_indices[:top_k]:
-                delta = log_losses[lila_idx] - best_ll
-                f.write(f"| **Lila Baseline** | `{grid[lila_idx]:.3f}d` | `{log_losses[lila_idx]:.6f}` | `{brier_scores[lila_idx]:.6f}` | `+{delta:.6f}` |\n")
+                d_elo = delta_log_loss_to_elo(float(log_losses[lila_idx]) - best_ll)
+                f.write(f"| **Lila Baseline** | `{grid[lila_idx]:.3f}d` | `{log_losses[lila_idx]:.6f}` | `{brier_scores[lila_idx]:.6f}` | `+{d_elo:.2f} Elo` |\n")
             f.write("\n")
 
 
