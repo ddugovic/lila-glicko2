@@ -56,15 +56,18 @@ def sweep_rating_periods(
 ):
     """Evaluate all candidate rating_period_days values in parallel across CPU threads."""
     n_p = len(period_days_grid)
-    game_log_losses = np.empty(n_p, dtype=np.float64)
-    game_brier_scores = np.empty(n_p, dtype=np.float64)
-    player_log_losses = np.empty(n_p, dtype=np.float64)
-    player_brier_scores = np.empty(n_p, dtype=np.float64)
-    eval_counts = np.empty(n_p, dtype=np.int64)
-    eval_players = np.empty(n_p, dtype=np.int64)
+    metrics = np.empty((n_p, 10), dtype=np.float64)
+    counts = np.empty((n_p, 5), dtype=np.int64)
 
     for idx in prange(n_p):
-        g_ll, g_bs, p_ll, p_bs, n_eval_g, n_eval_p = evaluate_rating_period(
+        (
+            metrics[idx, 0], metrics[idx, 1],
+            metrics[idx, 2], metrics[idx, 3],
+            metrics[idx, 4], metrics[idx, 5],
+            metrics[idx, 6], metrics[idx, 7],
+            metrics[idx, 8], metrics[idx, 9],
+            counts[idx, 0], counts[idx, 1], counts[idx, 2], counts[idx, 3], counts[idx, 4],
+        ) = evaluate_rating_period(
             white_ids,
             black_ids,
             scores,
@@ -75,14 +78,8 @@ def sweep_rating_periods(
             warmup_games=warmup_games,
             min_idle_days=min_idle_days,
         )
-        game_log_losses[idx] = g_ll
-        game_brier_scores[idx] = g_bs
-        player_log_losses[idx] = p_ll
-        player_brier_scores[idx] = p_bs
-        eval_counts[idx] = n_eval_g
-        eval_players[idx] = n_eval_p
 
-    return game_log_losses, game_brier_scores, player_log_losses, player_brier_scores, eval_counts, eval_players
+    return metrics, counts
 
 
 def active_numba_threads() -> int:

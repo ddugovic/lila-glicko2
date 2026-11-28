@@ -10,6 +10,9 @@ MAX_RATING = 4000.0
 
 MIN_RD = 45.0
 MAX_RD = 500.0                 # lila: maxDeviation = 500d
+PROVISIONAL_RD = 110.0         # lila: ? mark threshold
+ACTIVE_RD = 75.0               # lila: leaderboard RD threshold
+ACTIVE_DAYS = 7.0              # lila: active within 7 days
 INIT_VOL = 0.09                # lila: defaultVolatility = 0.09d
 MAX_VOL = 0.1                  # lila: maxVolatility = 0.1d
 TAU = 0.75                     # lila system constant
@@ -122,6 +125,22 @@ def update_player_m1(
 
 
 @njit(fastmath=True, cache=True)
+def _macro_avg(ll_sum: np.ndarray, bs_sum: np.ndarray, counts: np.ndarray):
+    total_ll = 0.0
+    total_bs = 0.0
+    n_active = 0
+    for u in range(len(counts)):
+        c = counts[u]
+        if c > 0:
+            total_ll += ll_sum[u] / c
+            total_bs += bs_sum[u] / c
+            n_active += 1
+    if n_active == 0:
+        return np.nan, np.nan, 0
+    return total_ll / n_active, total_bs / n_active, n_active
+
+
+@njit(fastmath=True, cache=True)
 def evaluate_rating_period(
     white_ids: np.ndarray,
     black_ids: np.ndarray,
@@ -133,7 +152,11 @@ def evaluate_rating_period(
     warmup_games: int = 500_000,
     min_idle_days: float = 0.0,
 ):
-    """Return (game_ll, game_brier, player_macro_ll, player_macro_brier, eval_games, eval_players)."""
+    """
+    Simulate full game stream and return:
+    (game_ll, game_bs, all_p_ll, all_p_bs, prov_ll, prov_bs, est_ll, est_bs, act_ll, act_bs,
+     eval_games, all_p_cnt, prov_cnt, est_cnt, act_cnt).
+    """
     min_mu = (MIN_RATING - INIT_RATING) / GLICKO2_SCALE
     max_mu = (MAX_RATING - INIT_RATING) / GLICKO2_SCALE
     max_phi = MAX_RD / GLICKO2_SCALE
@@ -144,9 +167,21 @@ def evaluate_rating_period(
     sigmas = np.full(n_players, INIT_VOL, dtype=np.float64)
     last_played = np.full(n_players, -1.0, dtype=np.float64)
 
-    player_ll_sum = np.zeros(n_players, dtype=np.float64)
-    player_bs_sum = np.zeros(n_players, dtype=np.float64)
-    player_eval_games = np.zeros(n_players, dtype=np.int32)
+    all_ll_sum = np.zeros(n_players, dtype=np.float64)
+    all_bs_sum = np.zeros(n_players, dtype=np.float64)
+    all_cnt = np.zeros(n_players, dtype=np.int32)
+
+    prov_ll_sum = np.zeros(n_players, dtype=np.float64)
+    prov_bs_sum = np.zeros(n_players, dtype=np.float64)
+    prov_cnt = np.zeros(n_players, dtype=np.int32)
+
+    est_ll_sum = np.zeros(n_players, dtype=np.float64)
+    est_bs_sum = np.zeros(n_players, dtype=np.float64)
+    est_cnt = np.zeros(n_players, dtype=np.int32)
+
+    act_ll_sum = np.zeros(n_players, dtype=np.float64)
+    act_bs_sum = np.zeros(n_players, dtype=np.float64)
+    act_cnt = np.zeros(n_players, dtype=np.int32)
 
     total_log_loss = 0.0
     total_brier = 0.0
@@ -182,12 +217,43 @@ def evaluate_rating_period(
                 total_brier += game_bs
                 eval_count += 1
 
-                player_ll_sum[w] += game_ll
-                player_ll_sum[b] += game_ll
-                player_bs_sum[w] += game_bs
-                player_bs_sum[b] += game_bs
-                player_eval_games[w] += 1
-                player_eval_games[b] += 1
+                # All players
+                all_ll_sum[w] += game_ll
+                all_bs_sum[w] += game_bs
+                all_cnt[w] += 1
+                all_ll_sum[b] += game_ll
+                all_bs_sum[b] += game_bs
+                all_cnt[b] += 1
+
+                # White RD cohorts
+                rd_w = phi_star_w * GLICKO2_SCALE
+                if rd_w >= PROVISIONAL_RD:
+                    prov_ll_sum[w] += game_ll
+                    prov_bs_sum[w] += game_bs
+                    prov_cnt[w] += 1
+                else:
+                    est_ll_sum[w] += game_ll
+                    est_bs_sum[w] += game_bs
+                    est_cnt[w] += 1
+                    if rd_w < ACTIVE_RD and 0.0 <= dt_w <= ACTIVE_DAYS:
+                        act_ll_sum[w] += game_ll
+                        act_bs_sum[w] += game_bs
+                        act_cnt[w] += 1
+
+                # Black RD cohorts
+                rd_b = phi_star_b * GLICKO2_SCALE
+                if rd_b >= PROVISIONAL_RD:
+                    prov_ll_sum[b] += game_ll
+                    prov_bs_sum[b] += game_bs
+                    prov_cnt[b] += 1
+                else:
+                    est_ll_sum[b] += game_ll
+                    est_bs_sum[b] += game_bs
+                    est_cnt[b] += 1
+                    if rd_b < ACTIVE_RD and 0.0 <= dt_b <= ACTIVE_DAYS:
+                        act_ll_sum[b] += game_ll
+                        act_bs_sum[b] += game_bs
+                        act_cnt[b] += 1
 
         new_mu_w, new_phi_w, new_sigma_w = update_player_m1(
             mu_w, phi_star_w, sigma_w, mu_b, phi_star_b, s_w, tau, min_phi, min_mu, max_mu
@@ -199,20 +265,19 @@ def evaluate_rating_period(
         mus[w], phis[w], sigmas[w], last_played[w] = new_mu_w, new_phi_w, new_sigma_w, t
         mus[b], phis[b], sigmas[b], last_played[b] = new_mu_b, new_phi_b, new_sigma_b, t
 
-    macro_ll = 0.0
-    macro_bs = 0.0
-    eval_players = 0
-    for u in range(n_players):
-        c = player_eval_games[u]
-        if c > 0:
-            macro_ll += player_ll_sum[u] / c
-            macro_bs += player_bs_sum[u] / c
-            eval_players += 1
-
     game_ll_avg = (total_log_loss / eval_count) if eval_count > 0 else np.nan
     game_bs_avg = (total_brier / eval_count) if eval_count > 0 else np.nan
-    macro_ll_avg = (macro_ll / eval_players) if eval_players > 0 else np.nan
-    macro_bs_avg = (macro_bs / eval_players) if eval_players > 0 else np.nan
+    all_p_ll, all_p_bs, all_p_n = _macro_avg(all_ll_sum, all_bs_sum, all_cnt)
+    prov_ll, prov_bs, prov_n = _macro_avg(prov_ll_sum, prov_bs_sum, prov_cnt)
+    est_ll, est_bs, est_n = _macro_avg(est_ll_sum, est_bs_sum, est_cnt)
+    act_ll, act_bs, act_n = _macro_avg(act_ll_sum, act_bs_sum, act_cnt)
 
-    return game_ll_avg, game_bs_avg, macro_ll_avg, macro_bs_avg, eval_count, eval_players
+    return (
+        game_ll_avg, game_bs_avg,
+        all_p_ll, all_p_bs,
+        prov_ll, prov_bs,
+        est_ll, est_bs,
+        act_ll, act_bs,
+        eval_count, all_p_n, prov_n, est_n, act_n,
+    )
 

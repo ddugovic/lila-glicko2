@@ -7,6 +7,14 @@ from dataset_loader import list_available_partitions, prepare_datasets
 from glicko2 import LILA_RATING_PERIOD_DAYS, active_numba_threads, load_encoded_games, sweep_rating_periods
 from partitions import CATEGORY_REPOS, STANDARD_SPEEDS, VALID_SPEEDS, expand_partitions, resolve_targets
 
+COHORTS = [
+    ("Game-Weighted (All Games)", 0, 1, 0),
+    ("Player-Weighted (All Players)", 2, 3, 1),
+    ("Player-Weighted: Provisional (RD >= 110)", 4, 5, 2),
+    ("Player-Weighted: Established (RD < 110)", 6, 7, 3),
+    ("Player-Weighted: Active (RD < 75, <= 7d)", 8, 9, 4),
+]
+
 
 def delta_log_loss_to_elo(delta_ll: float) -> float:
     """Converts excess log-loss (nats/game) into equivalent RMS Elo rating error."""
@@ -16,13 +24,15 @@ def delta_log_loss_to_elo(delta_ll: float) -> float:
     return scale * math.sqrt(2.0 * delta_ll)
 
 
-def _write_ranked_table(f, title: str, grid: np.ndarray, log_losses: np.ndarray, brier_scores: np.ndarray, lila_idx: int, top_k: int):
+def _write_ranked_table(f, title: str, n_units: int, unit_label: str, grid: np.ndarray, log_losses: np.ndarray, brier_scores: np.ndarray, lila_idx: int, top_k: int):
+    if np.all(np.isnan(log_losses)) or n_units == 0:
+        return
     ranked = np.argsort(log_losses)
-    best_idx = int(np.argmin(log_losses))
-    best_bs_idx = int(np.argmin(brier_scores))
+    best_idx = int(np.nanargmin(log_losses))
+    best_bs_idx = int(np.nanargmin(brier_scores))
     best_ll = float(log_losses[best_idx])
 
-    f.write(f"#### {title}\n\n")
+    f.write(f"#### {title} ({n_units:,} {unit_label})\n\n")
     f.write("| Rank / Benchmark | Rating Period (days) | Log-Loss | Brier | Δ Elo vs. Best |\n")
     f.write("| :--- | :---: | :---: | :---: | :---: |\n")
     for rank, idx in enumerate(ranked[:top_k], 1):
@@ -53,37 +63,49 @@ def run_sweep(
     white_ids, black_ids, scores, days, n_players = load_encoded_games(path)
     print(f"Loaded {len(scores):,} games ({n_players:,} players) in {time.perf_counter() - t0:.2f}s")
 
-    warmup = int(np.searchsorted(days, days[0] + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
+    warmup = int(np.searchsorted(days, days + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
     print(f"Warmup: {warmup:,} games | Min idle filter: {min_idle_days:.2f}d")
 
     t1 = time.perf_counter()
-    g_ll, g_bs, p_ll, p_bs, eval_g, eval_p = sweep_rating_periods(
+    metrics, counts = sweep_rating_periods(
         white_ids, black_ids, scores, days, n_players, grid, warmup_games=warmup, min_idle_days=min_idle_days
     )
     elapsed = time.perf_counter() - t1
-
     lila_idx = int(np.argmin(np.abs(grid - LILA_RATING_PERIOD_DAYS)))
-    g_best_idx = int(np.argmin(g_ll))
-    p_best_idx = int(np.argmin(p_ll))
 
-    print(f"Swept {len(grid)} values in {elapsed:.2f}s ({elapsed / len(grid):.3f}s/run) | Evaluated {int(eval_g[0]):,} games across {int(eval_p[0]):,} players")
-    print(f"  [Game-Weighted]   #1={grid[g_best_idx]:.3f}d (LL={g_ll[g_best_idx]:.6f}, Brier={g_bs[g_best_idx]:.6f}) | Lila 4.665d (+{delta_log_loss_to_elo(float(g_ll[lila_idx] - g_ll[g_best_idx])):.2f} Elo)")
-    print(f"  [Player-Weighted] #1={grid[p_best_idx]:.3f}d (LL={p_ll[p_best_idx]:.6f}, Brier={p_bs[p_best_idx]:.6f}) | Lila 4.665d (+{delta_log_loss_to_elo(float(p_ll[lila_idx] - p_ll[p_best_idx])):.2f} Elo)")
+    print(f"Swept {len(grid)} values in {elapsed:.2f}s ({elapsed / len(grid):.3f}s/run)")
+    for title, ll_col, bs_col, cnt_col in COHORTS:
+        ll_arr = metrics[:, ll_col]
+        bs_arr = metrics[:, bs_col]
+        n_units = int(counts[lila_idx, cnt_col])
+        if n_units == 0 or np.all(np.isnan(ll_arr)):
+            continue
+        best_idx = int(np.nanargmin(ll_arr))
+        d_elo = delta_log_loss_to_elo(float(ll_arr[lila_idx] - ll_arr[best_idx]))
+        print(f"  [{title}] n={n_units:,} | #1={grid[best_idx]:.3f}d (LL={ll_arr[best_idx]:.6f}, Brier={bs_arr[best_idx]:.6f}) | Lila (+{d_elo:.2f} Elo)")
 
     if csv_path:
         with open(csv_path, "w", encoding="utf-8") as f:
-            f.write("dataset,period_days,game_log_loss,game_brier,game_delta_elo,player_log_loss,player_brier,player_delta_elo,eval_games,eval_players\n")
-            for p, gl, gb, pl, pb, eg, ep in zip(grid, g_ll, g_bs, p_ll, p_bs, eval_g, eval_p):
-                g_elo = delta_log_loss_to_elo(float(gl - g_ll[g_best_idx]))
-                p_elo = delta_log_loss_to_elo(float(pl - p_ll[p_best_idx]))
-                f.write(f"{name},{p:.6f},{gl:.8f},{gb:.8f},{g_elo:.4f},{pl:.8f},{pb:.8f},{p_elo:.4f},{int(eg)},{int(ep)}\n")
+            f.write(
+                "dataset,period_days,game_ll,game_brier,player_ll,player_brier,"
+                "prov_ll,prov_brier,est_ll,est_brier,act_ll,act_brier,"
+                "eval_games,all_players,prov_players,est_players,act_players\n"
+            )
+            for idx, p in enumerate(grid):
+                m_str = ",".join(f"{val:.8f}" for val in metrics[idx])
+                c_str = ",".join(str(int(val)) for val in counts[idx])
+                f.write(f"{name},{p:.6f},{m_str},{c_str}\n")
 
     if summary_path:
         idle_note = f", min_idle={min_idle_days:.1f}d" if min_idle_days > 0 else ""
         with open(summary_path, "a", encoding="utf-8") as f:
-            f.write(f"### Glicko-2 Sweep: `{name}` ({int(eval_g[0]):,} eval games, {int(eval_p[0]):,} eval players, warmup={warmup:,}{idle_note})\n\n")
-            _write_ranked_table(f, "Game-Weighted (Micro Average)", grid, g_ll, g_bs, lila_idx, top_k)
-            _write_ranked_table(f, "Player-Weighted (Macro Average — Equal Weight per Player)", grid, p_ll, p_bs, lila_idx, top_k)
+            f.write(f"### Glicko-2 Sweep: `{name}` (warmup={warmup:,}{idle_note})\n\n")
+            for idx_c, (title, ll_col, bs_col, cnt_col) in enumerate(COHORTS):
+                unit_label = "games" if idx_c == 0 else "players"
+                _write_ranked_table(
+                    f, title, int(counts[lila_idx, cnt_col]), unit_label,
+                    grid, metrics[:, ll_col], metrics[:, bs_col], lila_idx, top_k,
+                )
 
 
 if __name__ == "__main__":
@@ -94,7 +116,7 @@ if __name__ == "__main__":
     parser.add_argument("--start-date", type=str, default=None)
     parser.add_argument("--end-date", type=str, default=None)
     parser.add_argument("--warmup-days", type=float, default=None)
-    parser.add_argument("--min-idle-days", type=float, default=0.0, help="Only score games where at least one player was idle >= N days")
+    parser.add_argument("--min-idle-days", type=float, default=0.0)
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--list-partitions", action="store_true")
     parser.add_argument("--summary", type=str, default=os.environ.get("GITHUB_STEP_SUMMARY"))
@@ -116,26 +138,15 @@ if __name__ == "__main__":
 
     try:
         datasets = prepare_datasets(
-            targets=targets,
-            partitions=partitions,
-            part_tag=part_tag,
-            date_tag=date_tag,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            refresh=args.refresh,
-            hf_token=os.environ.get("HF_TOKEN"),
+            targets=targets, partitions=partitions, part_tag=part_tag, date_tag=date_tag,
+            start_date=args.start_date, end_date=args.end_date, refresh=args.refresh, hf_token=os.environ.get("HF_TOKEN"),
         )
         for target in targets:
             if target in datasets:
                 label, parquet_path = datasets[target]
                 run_sweep(
-                    label,
-                    parquet_path,
-                    grid,
-                    warmup_days=args.warmup_days,
-                    min_idle_days=args.min_idle_days,
-                    summary_path=args.summary,
-                    csv_path=f"{label}_sweep.csv",
+                    label, parquet_path, grid, warmup_days=args.warmup_days,
+                    min_idle_days=args.min_idle_days, summary_path=args.summary, csv_path=f"{label}_sweep.csv",
                 )
     except KeyboardInterrupt:
         print("\nInterrupted; keeping results from completed sweeps.")
