@@ -1,0 +1,198 @@
+name: Glicko-2 Tuning
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      category:
+        description: "Game category (standard, variants, all, or a single variant)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - variants
+          - standard
+          - antichess
+          - atomic
+          - chess960
+          - crazyhouse
+          - horde
+          - king-of-the-hill
+          - racing-kings
+          - three-check
+      speed:
+        description: "Speed filter (use 'realtime' for unsplit real-time variants, 'all' for all speeds)"
+        required: true
+        default: "default"
+        type: choice
+        options:
+          - default
+          - all
+          - realtime
+          - ultrabullet
+          - bullet
+          - blitz
+          - rapid
+          - classical
+          - correspondence
+      partitions:
+        description: "Years, months, or ranges (e.g. 2013..2016, 2024, or 2025-01..2025-06)"
+        required: true
+        default: "2018"
+      warmup_days:
+        description: "Optional warmup window in days (leave blank for default)"
+        required: false
+        default: ""
+      min_idle_days:
+        description: "Optional minimum idle gap in days before scoring (e.g., 1.0)"
+        required: false
+        default: "0"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - name: Check PEP 8 & lint rules
+        run: |
+          ruff check .
+          ruff format --check .
+
+  smoke-test:
+    needs: lint
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+      - run: pip install -r requirements.txt
+      - name: Run fast 2013-01 end-to-end smoke test
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python3 tune_color_adv.py --category bullet --partitions 2013-01
+          python3 batch_sweep.py --category bullet --partitions 2013-01
+          python3 summarize_results.py
+
+  tune-standard:
+    needs: lint
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.category == 'all' || github.event.inputs.category == 'standard') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+      - run: pip install -r requirements.txt
+      - name: Run Glicko-2 tuning for standard
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          SPEED="${{ github.event.inputs.speed }}"
+          if [ "$SPEED" = "default" ]; then SPEED="all"; fi
+          BASE_ARGS=(--category standard --speed "$SPEED" --partitions ${{ github.event.inputs.partitions }})
+          if [ -n "${{ github.event.inputs.warmup_days }}" ]; then
+            BASE_ARGS+=(--warmup-days "${{ github.event.inputs.warmup_days }}")
+          fi
+
+          python3 tune_color_adv.py "${BASE_ARGS[@]}"
+
+          SWEEP_ARGS=("${BASE_ARGS[@]}")
+          if [ "${{ github.event.inputs.min_idle_days }}" != "0" ]; then
+            SWEEP_ARGS+=(--min-idle-days "${{ github.event.inputs.min_idle_days }}")
+          fi
+          python3 batch_sweep.py "${SWEEP_ARGS[@]}"
+      - name: Upload sweep CSV artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-standard
+          path: "*_sweep.csv"
+          if-no-files-found: ignore
+
+  tune-variant:
+    needs: lint
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.category != 'standard' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        variant:
+          - antichess
+          - atomic
+          - chess960
+          - crazyhouse
+          - horde
+          - king-of-the-hill
+          - racing-kings
+          - three-check
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+      - run: pip install -r requirements.txt
+      - name: Run Glicko-2 tuning for ${{ matrix.variant }}
+        if: ${{ github.event.inputs.category == 'all' || github.event.inputs.category == 'variants' || github.event.inputs.category == matrix.variant }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          BASE_ARGS=(--category "${{ matrix.variant }}" --partitions ${{ github.event.inputs.partitions }})
+          if [ "${{ github.event.inputs.speed }}" != "default" ]; then
+            BASE_ARGS+=(--speed "${{ github.event.inputs.speed }}")
+          fi
+          if [ -n "${{ github.event.inputs.warmup_days }}" ]; then
+            BASE_ARGS+=(--warmup-days "${{ github.event.inputs.warmup_days }}")
+          fi
+
+          python3 tune_color_adv.py "${BASE_ARGS[@]}"
+
+          SWEEP_ARGS=("${BASE_ARGS[@]}")
+          if [ "${{ github.event.inputs.min_idle_days }}" != "0" ]; then
+            SWEEP_ARGS+=(--min-idle-days "${{ github.event.inputs.min_idle_days }}")
+          fi
+          python3 batch_sweep.py "${SWEEP_ARGS[@]}"
+      - name: Upload sweep CSV artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-${{ matrix.variant }}
+          path: "*_sweep.csv"
+          if-no-files-found: ignore
+
+  summarize:
+    needs: [tune-standard, tune-variant]
+    if: ${{ github.event_name == 'workflow_dispatch' && always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sweep-*
+          merge-multiple: true
+      - name: Generate combined summary
+        run: python3 summarize_results.py
+
