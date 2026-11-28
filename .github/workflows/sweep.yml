@@ -25,7 +25,7 @@ on:
           - racing-kings
           - three-check
       speed:
-        description: "Speed filter (use 'none' for unsplit variants, 'all' for all speeds)"
+        description: "Speed filter (use 'none' for unsplit real-time variants, 'all' for all speeds)"
         type: choice
         required: true
         default: "all"
@@ -36,6 +36,7 @@ on:
           - blitz
           - rapid
           - classical
+          - correspondence
       partitions:
         description: "Years, months, or ranges (e.g. 2013..2016, 2024, or 2025-01..2025-06)"
         type: string

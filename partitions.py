@@ -11,13 +11,16 @@ CATEGORY_REPOS: dict[str, str] = {
 }
 
 VARIANT_CATEGORIES = [c for c in CATEGORY_REPOS if c != "standard"]
-STANDARD_SPEEDS = ["bullet", "blitz", "rapid", "classical"]
+STANDARD_SPEEDS = ["bullet", "blitz", "rapid", "classical", "correspondence"]
 VALID_SPEEDS = ["none", *STANDARD_SPEEDS]
 
 
 def speed_where_clause(speed: str) -> str:
     if speed == "none":
-        return "AND Event NOT LIKE '%Correspondence%'"
+        return "AND Event NOT LIKE '%Correspondence%' AND TimeControl != '-'"
+    if speed == "correspondence":
+        return "AND (Event LIKE '%Correspondence%' OR TimeControl = '-')"
+
     est_sec = (
         "(TRY_CAST(split_part(TimeControl, '+', 1) AS DOUBLE) "
         "+ 40.0 * COALESCE(TRY_CAST(split_part(TimeControl, '+', 2) AS DOUBLE), 0.0))"
