@@ -12,19 +12,8 @@ from glicko2_math import evaluate_rating_period
 from partitions import CATEGORY_REPOS, STANDARD_SPEEDS, VALID_SPEEDS, expand_partitions, resolve_targets
 
 
-def _game_ll(eval_fn, adv_elo: float) -> float:
-    game_ll, _, _, _ = eval_fn(adv_elo)
-    return game_ll
-
-
-def _est_ll(eval_fn, adv_elo: float) -> float:
-    _, _, est_ll, _ = eval_fn(adv_elo)
-    return est_ll
-
-
-def _rank_ll(eval_fn, adv_elo: float) -> float:
-    _, _, _, rank_ll = eval_fn(adv_elo)
-    return rank_ll
+def _pick(eval_fn, idx: int, adv_elo: float) -> float:
+    return eval_fn(adv_elo)[idx]
 
 
 def optimize_color_advantage(
@@ -35,7 +24,7 @@ def optimize_color_advantage(
     summary_path: str | None = None,
 ):
     white_ids, black_ids, scores, days, n_players = load_encoded_games(parquet_path)
-    warmup = int(days.searchsorted(days + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
+    warmup = int(days.searchsorted(days[0] + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
     eval_games = max(0, len(scores) - warmup)
 
     ref_rd_w, ref_rd_b, est_n, rank_n = compute_reference_rds(
@@ -50,7 +39,7 @@ def optimize_color_advantage(
     )
 
     def eval_adv(adv_elo: float):
-        (game_ll, game_brier, est_ll, _, rank_ll, *_), _ = evaluate_rating_period(
+        (game_ll, game_brier, est_ll, _, rank_ll, _, est_lk_ll, _, rank_lk_ll, *_), _ = evaluate_rating_period(
             white_ids,
             black_ids,
             scores,
@@ -65,37 +54,54 @@ def optimize_color_advantage(
             white_adv_elo=adv_elo,
             warmup_games=warmup,
         )
-        return float(game_ll), float(game_brier), float(est_ll), float(rank_ll)
+        return (
+            float(game_ll),
+            float(game_brier),
+            float(est_ll),
+            float(rank_ll),
+            float(est_lk_ll),
+            float(rank_lk_ll),
+        )
 
     t0 = time.perf_counter()
-    ll_zero, bs_zero, _, _ = eval_adv(0.0)
+    ll_zero, bs_zero, *_ = eval_adv(0.0)
 
-    res_all = minimize_scalar(lambda x: _game_ll(eval_adv, x), bounds=(-100.0, 200.0), method="bounded", options={"xatol": 1e-6})
+    res_all = minimize_scalar(lambda x: _pick(eval_adv, 0, x), bounds=(-100.0, 200.0), method="bounded", options={"xatol": 1e-6})
     best_all = float(res_all.x)
-    ll_best, bs_best, _, _ = eval_adv(best_all)
+    ll_best, bs_best, *_ = eval_adv(best_all)
 
     best_est = float("nan")
+    best_est_lk = float("nan")
     if est_n > 0:
-        res_est = minimize_scalar(lambda x: _est_ll(eval_adv, x), bounds=(-100.0, 200.0), method="bounded", options={"xatol": 1e-6})
+        res_est = minimize_scalar(lambda x: _pick(eval_adv, 2, x), bounds=(-100.0, 200.0), method="bounded", options={"xatol": 1e-6})
         best_est = float(res_est.x)
+        res_est_lk = minimize_scalar(lambda x: _pick(eval_adv, 4, x), bounds=(-100.0, 200.0), method="bounded", options={"xatol": 1e-6})
+        best_est_lk = float(res_est_lk.x)
 
     best_rank = float("nan")
+    best_rank_lk = float("nan")
     if rank_n > 0:
-        res_rank = minimize_scalar(lambda x: _rank_ll(eval_adv, x), bounds=(-100.0, 200.0), method="bounded", options={"xatol": 1e-6})
+        res_rank = minimize_scalar(lambda x: _pick(eval_adv, 3, x), bounds=(-100.0, 200.0), method="bounded", options={"xatol": 1e-6})
         best_rank = float(res_rank.x)
+        res_rank_lk = minimize_scalar(lambda x: _pick(eval_adv, 5, x), bounds=(-100.0, 200.0), method="bounded", options={"xatol": 1e-6})
+        best_rank_lk = float(res_rank_lk.x)
 
     elapsed = time.perf_counter() - t0
     print(
-        f"{name:28s} | All={best_all:9.6f}d | Est(n={est_n})={best_est:9.6f}d | Rank(n={rank_n})={best_rank:9.6f}d "
+        f"{name:28s} | All={best_all:9.6f}d | Est(Top/Lk, n={est_n})={best_est:9.6f}d / {best_est_lk:9.6f}d "
+        f"| Rank(Top/Lk, n={rank_n})={best_rank:9.6f}d / {best_rank_lk:9.6f}d "
         f"| LL: {ll_zero:.6f} -> {ll_best:.6f} ({elapsed:.2f}s)"
     )
 
     if summary_path:
         est_str = f"`{best_est:.6f}d` ({est_n:,})" if est_n > 0 else "—"
         rank_str = f"`{best_rank:.6f}d` ({rank_n:,})" if rank_n > 0 else "—"
+        est_lk_str = f"`{best_est_lk:.6f}d` ({est_n:,})" if est_n > 0 else "—"
+        rank_lk_str = f"`{best_rank_lk:.6f}d` ({rank_n:,})" if rank_n > 0 else "—"
         with open(summary_path, "a", encoding="utf-8") as f:
             f.write(
                 f"| `{name}` | {eval_games:,} | `{best_all:.6f}d` | {est_str} | {rank_str} | "
+                f"{est_lk_str} | {rank_lk_str} | "
                 f"`{ll_zero:.6f}` -> `{ll_best:.6f}` | `{bs_zero:.6f}` -> `{bs_best:.6f}` |\n"
             )
 
@@ -121,13 +127,14 @@ if __name__ == "__main__":
     part_tag = first_part if len(partitions) == 1 else f"{first_part}-to-{partitions[-1]}"
 
     if args.summary:
-        with open(summary_path := args.summary, "a", encoding="utf-8") as f:
-            f.write("## Glicko-2 ColorAdvantage Derivation\n\n")
+        with open(args.summary, "a", encoding="utf-8") as f:
+            f.write(f"## Glicko-2 ColorAdvantage Derivation (`{part_tag}`)\n\n")
             f.write(
-                "| Dataset | Eval Games | All Games `ColorAdvantage` | Established `ColorAdvantage` | "
-                "Rankable `ColorAdvantage` | Log-Loss (`0` -> Optimal) | Brier (`0` -> Optimal) |\n"
+                "| Dataset | Eval Games | All Games `ColorAdvantage` | Established (Top) | "
+                "Rankable (Top) | Established (Locked) | Rankable (Locked) | "
+                "Log-Loss (`0` -> Optimal) | Brier (`0` -> Optimal) |\n"
             )
-            f.write("| :--- | :---: | :---: | :---: | :---: | :---: | :---: |\n")
+            f.write("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
 
     datasets = prepare_datasets(
         targets=targets,
