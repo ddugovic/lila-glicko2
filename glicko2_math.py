@@ -55,9 +55,6 @@ def evaluate_rating_period(
     all_ll_sum = np.zeros(n_players, dtype=np.float64)
     all_bs_sum = np.zeros(n_players, dtype=np.float64)
     all_cnt = np.zeros(n_players, dtype=np.int32)
-    all_w_cnt = np.zeros(n_players, dtype=np.int32)
-    all_d_cnt = np.zeros(n_players, dtype=np.int32)
-    all_l_cnt = np.zeros(n_players, dtype=np.int32)
     cand_min_rd = np.full(n_players, 1e9, dtype=np.float64)
     ref_min_rd = np.full(n_players, 1e9, dtype=np.float64)
 
@@ -104,16 +101,6 @@ def evaluate_rating_period(
                 all_bs_sum[b] += g_bs
                 all_cnt[b] += 1
 
-                if s_w == 1.0:
-                    all_w_cnt[w] += 1
-                    all_w_cnt[b] += 1
-                elif s_w == 0.5:
-                    all_d_cnt[w] += 1
-                    all_d_cnt[b] += 1
-                else:
-                    all_l_cnt[w] += 1
-                    all_l_cnt[b] += 1
-
                 if rd_w < cand_min_rd[w]:
                     cand_min_rd[w] = rd_w
                 if fix_w < ref_min_rd[w]:
@@ -129,12 +116,15 @@ def evaluate_rating_period(
 
     eval_span = (last_eval_day - first_eval_day) if first_eval_day >= 0.0 else 1.0
     return summarize_player_cohorts(
+        white_ids,
+        black_ids,
+        scores,
+        days,
+        warmup_games,
+        min_idle_days,
         all_ll_sum,
         all_bs_sum,
         all_cnt,
-        all_w_cnt,
-        all_d_cnt,
-        all_l_cnt,
         cand_min_rd,
         ref_min_rd,
         total_log_loss,

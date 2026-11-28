@@ -102,37 +102,80 @@ def _write_gpp_quartiles(out_m: np.ndarray, offset: int, gpp_vals: np.ndarray):
 
 
 @njit(fastmath=True, cache=True)
-def _write_cohort_stats(
-    out_m: np.ndarray,
+def _write_both_in_cohort_wdl(
     out_c: np.ndarray,
-    m_off: int,
-    c_off: int,
-    g_off: int,
-    w_off: int,
-    ll_vals: np.ndarray,
-    bs_vals: np.ndarray,
-    cnt_vals: np.ndarray,
-    w_vals: np.ndarray,
-    d_vals: np.ndarray,
-    l_vals: np.ndarray,
+    white_ids: np.ndarray,
+    black_ids: np.ndarray,
+    scores: np.ndarray,
+    days: np.ndarray,
+    n_players: int,
+    warmup_games: int,
+    min_idle_days: float,
+    in_est_top: np.ndarray,
+    in_rank_top: np.ndarray,
+    in_est_lk: np.ndarray,
+    in_rank_lk: np.ndarray,
 ):
-    out_m[m_off] = float(np.mean(ll_vals))
-    out_m[m_off + 1] = float(np.mean(bs_vals))
-    out_c[c_off] = len(ll_vals)
-    out_c[g_off] = int(np.sum(cnt_vals))
-    out_c[w_off] = int(np.sum(w_vals))
-    out_c[w_off + 1] = int(np.sum(d_vals))
-    out_c[w_off + 2] = int(np.sum(l_vals))
+    last_played = np.full(n_players, -1.0, dtype=np.float64)
+    ew = ed = el = 0
+    rw = rd = rl = 0
+    elw = eld = ell = 0
+    rlw = rld = rll = 0
+
+    for i in range(len(scores)):
+        w, b, s_w, t = white_ids[i], black_ids[i], scores[i], days[i]
+        dt_w = (t - last_played[w]) if last_played[w] >= 0.0 else -1.0
+        dt_b = (t - last_played[b]) if last_played[b] >= 0.0 else -1.0
+
+        if i >= warmup_games:
+            qualifies = True if min_idle_days <= 0.0 else ((dt_w >= min_idle_days) or (dt_b >= min_idle_days))
+            if qualifies:
+                if in_est_top[w] and in_est_top[b]:
+                    if s_w == 1.0:
+                        ew += 1
+                    elif s_w == 0.5:
+                        ed += 1
+                    else:
+                        el += 1
+                if in_rank_top[w] and in_rank_top[b]:
+                    if s_w == 1.0:
+                        rw += 1
+                    elif s_w == 0.5:
+                        rd += 1
+                    else:
+                        rl += 1
+                if in_est_lk[w] and in_est_lk[b]:
+                    if s_w == 1.0:
+                        elw += 1
+                    elif s_w == 0.5:
+                        eld += 1
+                    else:
+                        ell += 1
+                if in_rank_lk[w] and in_rank_lk[b]:
+                    if s_w == 1.0:
+                        rlw += 1
+                    elif s_w == 0.5:
+                        rld += 1
+                    else:
+                        rll += 1
+
+        last_played[w], last_played[b] = t, t
+
+    out_c[6:10] = np.array([ew + ed + el, rw + rd + rl, elw + eld + ell, rlw + rld + rll], dtype=np.int64)
+    out_c[10:22] = np.array([ew, ed, el, rw, rd, rl, elw, eld, ell, rlw, rld, rll], dtype=np.int64)
 
 
 @njit(fastmath=True, cache=True)
 def summarize_player_cohorts(
+    white_ids: np.ndarray,
+    black_ids: np.ndarray,
+    scores: np.ndarray,
+    days: np.ndarray,
+    warmup_games: int,
+    min_idle_days: float,
     all_ll_sum: np.ndarray,
     all_bs_sum: np.ndarray,
     all_cnt: np.ndarray,
-    all_w_cnt: np.ndarray,
-    all_d_cnt: np.ndarray,
-    all_l_cnt: np.ndarray,
     cand_min_rd: np.ndarray,
     ref_min_rd: np.ndarray,
     total_log_loss: float,
@@ -144,13 +187,8 @@ def summarize_player_cohorts(
     rating_period_days: float,
     eval_span_days: float,
 ):
-    """Build 24 metrics and 22 counts including W D L per cohort."""
     n_players = len(all_cnt)
-    n_act = 0
-    for u in range(n_players):
-        if all_cnt[u] > 0:
-            n_act += 1
-
+    n_act = int(np.sum(all_cnt > 0))
     out_m = np.full(24, np.nan, dtype=np.float64)
     out_c = np.zeros(22, dtype=np.int64)
     base = 0
@@ -162,12 +200,9 @@ def summarize_player_cohorts(
     if n_act == 0:
         return out_m, out_c
 
+    act_uids = np.empty(n_act, dtype=np.int32)
     p_ll = np.empty(n_act, dtype=np.float64)
     p_bs = np.empty(n_act, dtype=np.float64)
-    p_cnt = np.empty(n_act, dtype=np.int64)
-    p_w = np.empty(n_act, dtype=np.int64)
-    p_d = np.empty(n_act, dtype=np.int64)
-    p_l = np.empty(n_act, dtype=np.int64)
     p_cand_rd = np.empty(n_act, dtype=np.float64)
     p_ref_rd = np.empty(n_act, dtype=np.float64)
     p_gpp = np.empty(n_act, dtype=np.float64)
@@ -177,16 +212,18 @@ def summarize_player_cohorts(
     for u in range(n_players):
         c = all_cnt[u]
         if c > 0:
+            act_uids[j] = u
             p_ll[j] = all_ll_sum[u] / c
             p_bs[j] = all_bs_sum[u] / c
-            p_cnt[j] = c
-            p_w[j] = all_w_cnt[u]
-            p_d[j] = all_d_cnt[u]
-            p_l[j] = all_l_cnt[u]
             p_cand_rd[j] = cand_min_rd[u]
             p_ref_rd[j] = ref_min_rd[u]
             p_gpp[j] = (c / span) * rating_period_days
             j += 1
+
+    in_est_top = np.zeros(n_players, dtype=np.bool_)
+    in_rank_top = np.zeros(n_players, dtype=np.bool_)
+    in_est_lk = np.zeros(n_players, dtype=np.bool_)
+    in_rank_lk = np.zeros(n_players, dtype=np.bool_)
 
     order = np.argsort(p_cand_rd)
     n_est = min(est_target_n, n_act)
@@ -194,26 +231,54 @@ def summarize_player_cohorts(
 
     if n_est > 0:
         est_idx = order[:n_est]
-        rd_est_off = 10
-        out_m[rd_est_off] = float(p_cand_rd[order[n_est - 1]])
-        _write_cohort_stats(out_m, out_c, 2, 2, 6, 10, p_ll[est_idx], p_bs[est_idx], p_cnt[est_idx], p_w[est_idx], p_d[est_idx], p_l[est_idx])
+        m_off, c_off, rd_off = 2, 2, 10
+        out_m[m_off] = float(np.mean(p_ll[est_idx]))
+        out_m[m_off + 1] = float(np.mean(p_bs[est_idx]))
+        out_m[rd_off] = float(p_cand_rd[order[n_est - 1]])
+        out_c[c_off] = n_est
         _write_gpp_quartiles(out_m, 12, p_gpp[est_idx])
+        in_est_top[act_uids[est_idx]] = True
 
     if n_rank > 0:
         rank_idx = order[:n_rank]
-        rd_rank_off = 11
-        out_m[rd_rank_off] = float(p_cand_rd[order[n_rank - 1]])
-        _write_cohort_stats(out_m, out_c, 4, 3, 7, 13, p_ll[rank_idx], p_bs[rank_idx], p_cnt[rank_idx], p_w[rank_idx], p_d[rank_idx], p_l[rank_idx])
+        m_off, c_off, rd_off = 4, 3, 11
+        out_m[m_off] = float(np.mean(p_ll[rank_idx]))
+        out_m[m_off + 1] = float(np.mean(p_bs[rank_idx]))
+        out_m[rd_off] = float(p_cand_rd[order[n_rank - 1]])
+        out_c[c_off] = n_rank
         _write_gpp_quartiles(out_m, 15, p_gpp[rank_idx])
+        in_rank_top[act_uids[rank_idx]] = True
 
     lk_est_mask = p_ref_rd < PROVISIONAL_RD
     if int(np.sum(lk_est_mask)) > 0:
-        _write_cohort_stats(out_m, out_c, 6, 4, 8, 16, p_ll[lk_est_mask], p_bs[lk_est_mask], p_cnt[lk_est_mask], p_w[lk_est_mask], p_d[lk_est_mask], p_l[lk_est_mask])
+        m_off, c_off = 6, 4
+        out_m[m_off] = float(np.mean(p_ll[lk_est_mask]))
+        out_m[m_off + 1] = float(np.mean(p_bs[lk_est_mask]))
+        out_c[c_off] = int(np.sum(lk_est_mask))
         _write_gpp_quartiles(out_m, 18, p_gpp[lk_est_mask])
+        in_est_lk[act_uids[lk_est_mask]] = True
 
     lk_rank_mask = p_ref_rd <= rankable_rd
     if int(np.sum(lk_rank_mask)) > 0:
-        _write_cohort_stats(out_m, out_c, 8, 5, 9, 19, p_ll[lk_rank_mask], p_bs[lk_rank_mask], p_cnt[lk_rank_mask], p_w[lk_rank_mask], p_d[lk_rank_mask], p_l[lk_rank_mask])
+        m_off, c_off = 8, 5
+        out_m[m_off] = float(np.mean(p_ll[lk_rank_mask]))
+        out_m[m_off + 1] = float(np.mean(p_bs[lk_rank_mask]))
+        out_c[c_off] = int(np.sum(lk_rank_mask))
         _write_gpp_quartiles(out_m, 21, p_gpp[lk_rank_mask])
+        in_rank_lk[act_uids[lk_rank_mask]] = True
 
+    _write_both_in_cohort_wdl(
+        out_c,
+        white_ids,
+        black_ids,
+        scores,
+        days,
+        n_players,
+        warmup_games,
+        min_idle_days,
+        in_est_top,
+        in_rank_top,
+        in_est_lk,
+        in_rank_lk,
+    )
     return out_m, out_c
