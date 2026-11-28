@@ -142,10 +142,7 @@ def report_sweep_results(
     if summary_path:
         idle_note = f", min_idle={min_idle_days:.1f}d" if min_idle_days > 0 else ""
         with open(summary_path, "a", encoding="utf-8") as f:
-            f.write(
-                f"### Glicko-2 Sweep: `{name}` (warmup={warmup:,}, rankable_rd<={rankable_rd:.0f}, "
-                f"white_adv=+{white_adv_elo:.2f} Elo{idle_note})\n\n"
-            )
+            f.write(f"### Glicko-2 Sweep: `{name}` (warmup={warmup:,}, rankable_rd<={rankable_rd:.0f}, white_adv=+{white_adv_elo:.2f} Elo{idle_note})\n\n")
             for idx_c, (title, ll_col, bs_col, cnt_col, games_col, thresh_col, gpp_col, scope) in enumerate(cohorts):
                 unit_label = "games" if idx_c == 0 else "players"
                 n_games = int(counts[lila_idx, games_col]) if games_col is not None else None

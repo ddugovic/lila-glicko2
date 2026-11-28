@@ -55,6 +55,9 @@ def evaluate_rating_period(
     all_ll_sum = np.zeros(n_players, dtype=np.float64)
     all_bs_sum = np.zeros(n_players, dtype=np.float64)
     all_cnt = np.zeros(n_players, dtype=np.int32)
+    all_w_cnt = np.zeros(n_players, dtype=np.int32)
+    all_d_cnt = np.zeros(n_players, dtype=np.int32)
+    all_l_cnt = np.zeros(n_players, dtype=np.int32)
     cand_min_rd = np.full(n_players, 1e9, dtype=np.float64)
     ref_min_rd = np.full(n_players, 1e9, dtype=np.float64)
 
@@ -97,25 +100,31 @@ def evaluate_rating_period(
                 all_ll_sum[w] += g_ll
                 all_bs_sum[w] += g_bs
                 all_cnt[w] += 1
+                all_ll_sum[b] += g_ll
+                all_bs_sum[b] += g_bs
+                all_cnt[b] += 1
+
+                if s_w == 1.0:
+                    all_w_cnt[w] += 1
+                    all_w_cnt[b] += 1
+                elif s_w == 0.5:
+                    all_d_cnt[w] += 1
+                    all_d_cnt[b] += 1
+                else:
+                    all_l_cnt[w] += 1
+                    all_l_cnt[b] += 1
+
                 if rd_w < cand_min_rd[w]:
                     cand_min_rd[w] = rd_w
                 if fix_w < ref_min_rd[w]:
                     ref_min_rd[w] = fix_w
-
-                all_ll_sum[b] += g_ll
-                all_bs_sum[b] += g_bs
-                all_cnt[b] += 1
                 if rd_b < cand_min_rd[b]:
                     cand_min_rd[b] = rd_b
                 if fix_b < ref_min_rd[b]:
                     ref_min_rd[b] = fix_b
 
-        mus[w], phis[w], sigmas[w] = update_player_m1(
-            mus[w], phi_star_w, sigmas[w], mus[b] - white_adv_mu, phi_star_b, s_w, tau, min_phi, min_mu, max_mu
-        )
-        mus[b], phis[b], sigmas[b] = update_player_m1(
-            mus[b], phi_star_b, sigmas[b], mus[w] + white_adv_mu, phi_star_w, 1.0 - s_w, tau, min_phi, min_mu, max_mu
-        )
+        mus[w], phis[w], sigmas[w] = update_player_m1(mus[w], phi_star_w, sigmas[w], mus[b] - white_adv_mu, phi_star_b, s_w, tau, min_phi, min_mu, max_mu)
+        mus[b], phis[b], sigmas[b] = update_player_m1(mus[b], phi_star_b, sigmas[b], mus[w] + white_adv_mu, phi_star_w, 1.0 - s_w, tau, min_phi, min_mu, max_mu)
         last_played[w], last_played[b] = t, t
 
     eval_span = (last_eval_day - first_eval_day) if first_eval_day >= 0.0 else 1.0
@@ -123,6 +132,9 @@ def evaluate_rating_period(
         all_ll_sum,
         all_bs_sum,
         all_cnt,
+        all_w_cnt,
+        all_d_cnt,
+        all_l_cnt,
         cand_min_rd,
         ref_min_rd,
         total_log_loss,

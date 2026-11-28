@@ -24,12 +24,11 @@ def optimize_color_advantage(
     summary_path: str | None = None,
 ):
     white_ids, black_ids, scores, days, n_players = load_encoded_games(parquet_path)
-    warmup = int(days.searchsorted(days[0] + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
+    warmup = int(days.searchsorted(days + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
     eval_scores = scores[warmup:]
-    w_cnt = int((eval_scores == 1.0).sum())
-    d_cnt = int((eval_scores == 0.5).sum())
-    l_cnt = int((eval_scores == 0.0).sum())
-    wdl_str = f"{w_cnt:,} / {d_cnt:,} / {l_cnt:,}"
+    w_all = int((eval_scores == 1.0).sum())
+    d_all = int((eval_scores == 0.5).sum())
+    l_all = int((eval_scores == 0.0).sum())
 
     ref_rd_w, ref_rd_b, est_n, rank_n = compute_reference_rds(
         white_ids,
@@ -43,7 +42,7 @@ def optimize_color_advantage(
     )
 
     def eval_adv(adv_elo: float):
-        (game_ll, game_brier, est_ll, _, rank_ll, _, est_lk_ll, _, rank_lk_ll, *_), _ = evaluate_rating_period(
+        (game_ll, game_brier, est_ll, _, rank_ll, _, est_lk_ll, _, rank_lk_ll, *_), c = evaluate_rating_period(
             white_ids,
             black_ids,
             scores,
@@ -65,10 +64,12 @@ def optimize_color_advantage(
             float(rank_ll),
             float(est_lk_ll),
             float(rank_lk_ll),
+            c,
         )
 
     t0 = time.perf_counter()
-    ll_zero, bs_zero, *_ = eval_adv(0.0)
+    ll_zero, bs_zero, _, _, _, _, c_base = eval_adv(0.0)
+    _, _, _, _, _, _, _, _, _, _, ew, ed, el, rw, rd, rl, elw, eld, ell, rlw, rld, rll = c_base
 
     res_all = minimize_scalar(lambda x: _pick(eval_adv, 0, x), bounds=(-100.0, 200.0), method="bounded", options={"xatol": 1e-6})
     best_all = float(res_all.x)
@@ -92,19 +93,21 @@ def optimize_color_advantage(
 
     elapsed = time.perf_counter() - t0
     print(
-        f"{name:28s} | All={best_all:9.6f}d | Est(Top/Lk, n={est_n})={best_est:9.6f}d / {best_est_lk:9.6f}d "
-        f"| Rank(Top/Lk, n={rank_n})={best_rank:9.6f}d / {best_rank_lk:9.6f}d "
+        f"{name:28s} | All={best_all:9.6f}d ({w_all} {d_all} {l_all}) "
+        f"| Est={best_est:9.6f}d / {best_est_lk:9.6f}d ({int(elw)} {int(eld)} {int(ell)}) "
+        f"| Rank={best_rank:9.6f}d / {best_rank_lk:9.6f}d ({int(rlw)} {int(rld)} {int(rll)}) "
         f"| LL: {ll_zero:.6f} -> {ll_best:.6f} ({elapsed:.2f}s)"
     )
 
     if summary_path:
-        est_str = f"`{best_est:.6f}d` ({est_n:,})" if est_n > 0 else "—"
-        rank_str = f"`{best_rank:.6f}d` ({rank_n:,})" if rank_n > 0 else "—"
-        est_lk_str = f"`{best_est_lk:.6f}d` ({est_n:,})" if est_n > 0 else "—"
-        rank_lk_str = f"`{best_rank_lk:.6f}d` ({rank_n:,})" if rank_n > 0 else "—"
+        all_wdl = f"{w_all:,} {d_all:,} {l_all:,}"
+        est_str = f"`{best_est:.6f}d` ({int(ew):,} {int(ed):,} {int(el):,})" if est_n > 0 else "—"
+        rank_str = f"`{best_rank:.6f}d` ({int(rw):,} {int(rd):,} {int(rl):,})" if rank_n > 0 else "—"
+        est_lk_str = f"`{best_est_lk:.6f}d` ({int(elw):,} {int(eld):,} {int(ell):,})" if est_n > 0 else "—"
+        rank_lk_str = f"`{best_rank_lk:.6f}d` ({int(rlw):,} {int(rld):,} {int(rll):,})" if rank_n > 0 else "—"
         with open(summary_path, "a", encoding="utf-8") as f:
             f.write(
-                f"| `{name}` | {wdl_str} | `{best_all:.6f}d` | {est_str} | {rank_str} | "
+                f"| `{name}` | {all_wdl} | `{best_all:.6f}d` | {est_str} | {rank_str} | "
                 f"{est_lk_str} | {rank_lk_str} | "
                 f"`{ll_zero:.6f}` -> `{ll_best:.6f}` | `{bs_zero:.6f}` -> `{bs_best:.6f}` |\n"
             )
@@ -134,7 +137,7 @@ if __name__ == "__main__":
         with open(args.summary, "a", encoding="utf-8") as f:
             f.write(f"## Glicko-2 ColorAdvantage Derivation (`{part_tag}`)\n\n")
             f.write(
-                "| Dataset | W / D / L | All Games `ColorAdvantage` | Established (Top) | "
+                "| Dataset | W D L | All Games `ColorAdvantage` | Established (Top) | "
                 "Rankable (Top) | Established (Locked) | Rankable (Locked) | "
                 "Log-Loss (`0` -> Optimal) | Brier (`0` -> Optimal) |\n"
             )

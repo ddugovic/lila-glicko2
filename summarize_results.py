@@ -55,10 +55,7 @@ def main():
                 continue
             best_idx = int(np.nanargmin(ll))
             d_elo = delta_elo(float(ll[lila_idx] - ll[best_idx]))
-            lines.append(
-                f"| `{dataset}` | {title} | {n_units:,} {unit_lbl} | "
-                f"`{periods[best_idx]:.3f}d` | `{ll[best_idx]:.6f}` | `{bs[best_idx]:.6f}` | `+{d_elo:.2f} Elo` |\n"
-            )
+            lines.append(f"| `{dataset}` | {title} | {n_units:,} {unit_lbl} | `{periods[best_idx]:.3f}d` | `{ll[best_idx]:.6f}` | `{bs[best_idx]:.6f}` | `+{d_elo:.2f} Elo` |\n")
 
     output = "".join(lines)
     print(output)

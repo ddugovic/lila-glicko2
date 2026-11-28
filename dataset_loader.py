@@ -98,10 +98,7 @@ def prepare_datasets(
         shards = [
             entry
             for entry in repo_entries
-            if hasattr(entry, "size")
-            and entry.size is not None
-            and any(entry.path.startswith(prefix) for prefix in prefixes)
-            and entry.path.endswith(".parquet")
+            if hasattr(entry, "size") and entry.size is not None and any(entry.path.startswith(prefix) for prefix in prefixes) and entry.path.endswith(".parquet")
         ]
         if not shards:
             print(f"  Skipping {', '.join(f'{c}/{s}' for c, s, _, _ in repo_targets)}: no shards found in {repo_id}.")
@@ -153,9 +150,7 @@ def prepare_datasets(
                 COPY (SELECT * FROM read_parquet({parts_by_target[(cat, speed)]}) ORDER BY timestamp ASC)
                 TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
                 """)
-                count, first_ts, last_ts = con.execute(
-                    f"SELECT COUNT(*), MIN(to_timestamp(timestamp)), MAX(to_timestamp(timestamp)) FROM '{out_path}'"
-                ).fetchone()
+                count, first_ts, last_ts = con.execute(f"SELECT COUNT(*), MIN(to_timestamp(timestamp)), MAX(to_timestamp(timestamp)) FROM '{out_path}'").fetchone()
                 if count == 0:
                     os.remove(out_path)
                     print(f"  Skipping {cat}/{speed}: 0 games matched.")

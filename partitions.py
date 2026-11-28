@@ -25,9 +25,7 @@ def speed_where_clause(speed: str) -> str:
     if speed == "correspondence":
         return "AND (Event LIKE '%Correspondence%' OR TimeControl = '-')"
 
-    est_sec = (
-        "(TRY_CAST(split_part(TimeControl, '+', 1) AS DOUBLE) + 40.0 * COALESCE(TRY_CAST(split_part(TimeControl, '+', 2) AS DOUBLE), 0.0))"
-    )
+    est_sec = "(TRY_CAST(split_part(TimeControl, '+', 1) AS DOUBLE) + 40.0 * COALESCE(TRY_CAST(split_part(TimeControl, '+', 2) AS DOUBLE), 0.0))"
     bounds = {
         "ultrabullet": f"{est_sec} < 30",
         "bullet": f"{est_sec} >= 30 AND {est_sec} < 180",
