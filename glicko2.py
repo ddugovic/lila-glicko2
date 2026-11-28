@@ -58,7 +58,6 @@ def _sweep_parallel(
     ref_rd_w: np.ndarray,
     ref_rd_b: np.ndarray,
     n_players: int,
-    prov_target_n: int,
     est_target_n: int,
     rank_target_n: int,
     period_days_grid: np.ndarray,
@@ -69,8 +68,8 @@ def _sweep_parallel(
     min_idle_days: float,
 ):
     n_p = len(period_days_grid)
-    metrics = np.empty((n_p, 18), dtype=np.float64)
-    counts = np.empty((n_p, 8), dtype=np.int64)
+    metrics = np.empty((n_p, 12), dtype=np.float64)
+    counts = np.empty((n_p, 6), dtype=np.int64)
 
     for idx in prange(n_p):
         m_row, c_row = evaluate_rating_period(
@@ -81,7 +80,6 @@ def _sweep_parallel(
             ref_rd_w,
             ref_rd_b,
             n_players,
-            prov_target_n=prov_target_n,
             est_target_n=est_target_n,
             rank_target_n=rank_target_n,
             rating_period_days=period_days_grid[idx],
@@ -111,7 +109,7 @@ def sweep_rating_periods(
     min_idle_days: float = 0.0,
 ):
     """Computes baseline reference RDs & target player cohort counts once, then sweeps in parallel."""
-    ref_rd_w, ref_rd_b, prov_target_n, est_target_n, rank_target_n = compute_reference_rds(
+    ref_rd_w, ref_rd_b, est_target_n, rank_target_n = compute_reference_rds(
         white_ids,
         black_ids,
         scores,
@@ -131,7 +129,6 @@ def sweep_rating_periods(
         ref_rd_w,
         ref_rd_b,
         n_players,
-        prov_target_n,
         est_target_n,
         rank_target_n,
         period_days_grid,

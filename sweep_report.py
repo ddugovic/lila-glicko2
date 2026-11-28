@@ -16,13 +16,10 @@ def delta_log_loss_to_elo(delta_ll: float) -> float:
 def build_cohorts():
     return [
         ("Game-Weighted (All Games)", 0, 1, 0, None, ""),
-        ("Player-Weighted (All Players)", 2, 3, 1, None, ""),
-        ("Player-Weighted: Provisional", 4, 5, 2, 16, "Bottom"),
-        ("Player-Weighted: Established", 6, 7, 3, 16, "Top"),
-        ("Player-Weighted: Rankable", 8, 9, 4, 17, "Top"),
-        ("Player-Weighted: Provisional", 10, 11, 5, None, "Locked"),
-        ("Player-Weighted: Established", 12, 13, 6, None, "Locked"),
-        ("Player-Weighted: Rankable", 14, 15, 7, None, "Locked"),
+        ("Player-Weighted: Established", 2, 3, 2, 10, "Top"),
+        ("Player-Weighted: Rankable", 4, 5, 3, 11, "Top"),
+        ("Player-Weighted: Established", 6, 7, 4, None, "Locked"),
+        ("Player-Weighted: Rankable", 8, 9, 5, None, "Locked"),
     ]
 
 
@@ -110,12 +107,12 @@ def report_sweep_results(
     if csv_path:
         with open(csv_path, "w", encoding="utf-8") as f:
             f.write(
-                "dataset,period_days,game_ll,game_brier,player_ll,player_brier,"
-                "prov_ll,prov_brier,est_ll,est_brier,rankable_ll,rankable_brier,"
-                "prov_locked_ll,prov_locked_brier,est_locked_ll,est_locked_brier,rankable_locked_ll,rankable_locked_brier,"
+                "dataset,period_days,game_ll,game_brier,"
+                "est_ll,est_brier,rankable_ll,rankable_brier,"
+                "est_locked_ll,est_locked_brier,rankable_locked_ll,rankable_locked_brier,"
                 "rd_cut_est,rd_cut_rank,"
-                "eval_games,all_players,prov_players,est_players,rankable_players,"
-                "prov_locked_players,est_locked_players,rankable_locked_players\n"
+                "eval_games,all_players,est_players,rankable_players,"
+                "est_locked_players,rankable_locked_players\n"
             )
             for idx, p in enumerate(grid):
                 m_str = ",".join(f"{val:.8f}" for val in metrics[idx])

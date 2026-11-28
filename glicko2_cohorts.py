@@ -32,7 +32,7 @@ def compute_reference_rds(
     warmup_games: int = 500_000,
     min_idle_days: float = 0.0,
 ):
-    """Run Lila baseline (4.665d) once to record fixed pre-game RDs and exact player cohort sizes."""
+    """Run Lila baseline (4.665d) once to record fixed pre-game RDs and exact Established/Rankable counts."""
     n_games = len(scores)
     ref_rd_w = np.empty(n_games, dtype=np.float32)
     ref_rd_b = np.empty(n_games, dtype=np.float32)
@@ -82,20 +82,17 @@ def compute_reference_rds(
         )
         last_played[w], last_played[b] = t, t
 
-    prov_target_n = 0
     est_target_n = 0
     rank_target_n = 0
     for u in range(n_players):
         if eval_cnt[u] > 0:
             m_rd = ref_min_rd[u]
-            if m_rd >= PROVISIONAL_RD:
-                prov_target_n += 1
-            else:
+            if m_rd < PROVISIONAL_RD:
                 est_target_n += 1
                 if m_rd <= rankable_rd:
                     rank_target_n += 1
 
-    return ref_rd_w, ref_rd_b, prov_target_n, est_target_n, rank_target_n
+    return ref_rd_w, ref_rd_b, est_target_n, rank_target_n
 
 
 @njit(fastmath=True, cache=True)
@@ -108,23 +105,23 @@ def summarize_player_cohorts(
     total_log_loss: float,
     total_brier: float,
     eval_count: int,
-    prov_target_n: int,
     est_target_n: int,
     rank_target_n: int,
     rankable_rd: float,
 ):
-    """Build 18 metrics and 8 counts from per-player accumulators."""
+    """Build 12 metrics and 6 counts for Game-Weighted, Established, and Rankable (Top & Locked)."""
     n_players = len(all_cnt)
     n_act = 0
     for u in range(n_players):
         if all_cnt[u] > 0:
             n_act += 1
 
-    out_m = np.full(18, np.nan, dtype=np.float64)
-    out_c = np.zeros(8, dtype=np.int64)
+    out_m = np.full(12, np.nan, dtype=np.float64)
+    out_c = np.zeros(6, dtype=np.int64)
     out_m[0] = (total_log_loss / eval_count) if eval_count > 0 else np.nan
     out_m[1] = (total_brier / eval_count) if eval_count > 0 else np.nan
     out_c[0] = eval_count
+    out_c[1] = n_act
 
     if n_act == 0:
         return out_m, out_c
@@ -144,45 +141,29 @@ def summarize_player_cohorts(
             p_ref_rd[j] = ref_min_rd[u]
             j += 1
 
-    out_m[2] = float(np.mean(p_ll))
-    out_m[3] = float(np.mean(p_bs))
-    out_c[1] = n_act
-
     order = np.argsort(p_cand_rd)
-    n_rank = min(rank_target_n, n_act)
     n_est = min(est_target_n, n_act)
-    n_prov = min(prov_target_n, n_act)
-
-    if n_prov > 0:
-        prov_idx = order[n_act - n_prov :]
-        out_m[4] = float(np.mean(p_ll[prov_idx]))
-        out_m[5] = float(np.mean(p_bs[prov_idx]))
-        out_c[2] = n_prov
+    n_rank = min(rank_target_n, n_act)
 
     if n_est > 0:
         est_idx = order[:n_est]
-        out_m[6] = float(np.mean(p_ll[est_idx]))
-        out_m[7] = float(np.mean(p_bs[est_idx]))
-        out_c[3] = n_est
-        out_m[16] = float(p_cand_rd[order[n_est - 1]])
+        out_m[2] = float(np.mean(p_ll[est_idx]))
+        out_m[3] = float(np.mean(p_bs[est_idx]))
+        out_m[10] = float(p_cand_rd[order[n_est - 1]])
+        out_c[2] = n_est
 
     if n_rank > 0:
         rank_idx = order[:n_rank]
-        out_m[8] = float(np.mean(p_ll[rank_idx]))
-        out_m[9] = float(np.mean(p_bs[rank_idx]))
-        out_c[4] = n_rank
-        out_m[17] = float(p_cand_rd[order[n_rank - 1]])
+        out_m[4] = float(np.mean(p_ll[rank_idx]))
+        out_m[5] = float(np.mean(p_bs[rank_idx]))
+        out_m[11] = float(p_cand_rd[order[n_rank - 1]])
+        out_c[3] = n_rank
 
-    lk_prov_ll, lk_prov_bs, lk_prov_n = 0.0, 0.0, 0
     lk_est_ll, lk_est_bs, lk_est_n = 0.0, 0.0, 0
     lk_rank_ll, lk_rank_bs, lk_rank_n = 0.0, 0.0, 0
     for idx_p in range(n_act):
         r_rd = p_ref_rd[idx_p]
-        if r_rd >= PROVISIONAL_RD:
-            lk_prov_ll += p_ll[idx_p]
-            lk_prov_bs += p_bs[idx_p]
-            lk_prov_n += 1
-        else:
+        if r_rd < PROVISIONAL_RD:
             lk_est_ll += p_ll[idx_p]
             lk_est_bs += p_bs[idx_p]
             lk_est_n += 1
@@ -191,17 +172,13 @@ def summarize_player_cohorts(
                 lk_rank_bs += p_bs[idx_p]
                 lk_rank_n += 1
 
-    if lk_prov_n > 0:
-        out_m[10] = lk_prov_ll / lk_prov_n
-        out_m[11] = lk_prov_bs / lk_prov_n
-        out_c[5] = lk_prov_n
     if lk_est_n > 0:
-        out_m[12] = lk_est_ll / lk_est_n
-        out_m[13] = lk_est_bs / lk_est_n
-        out_c[6] = lk_est_n
+        out_m[6] = lk_est_ll / lk_est_n
+        out_m[7] = lk_est_bs / lk_est_n
+        out_c[4] = lk_est_n
     if lk_rank_n > 0:
-        out_m[14] = lk_rank_ll / lk_rank_n
-        out_m[15] = lk_rank_bs / lk_rank_n
-        out_c[7] = lk_rank_n
+        out_m[8] = lk_rank_ll / lk_rank_n
+        out_m[9] = lk_rank_bs / lk_rank_n
+        out_c[5] = lk_rank_n
 
     return out_m, out_c
