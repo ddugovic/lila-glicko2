@@ -51,11 +51,22 @@ def load_encoded_games(parquet_path: str):
 
 @njit(parallel=True, fastmath=True, cache=True)
 def _sweep_parallel(
-    white_ids: np.ndarray, black_ids: np.ndarray, scores: np.ndarray, days: np.ndarray,
-    ref_rd_w: np.ndarray, ref_rd_b: np.ndarray, n_players: int,
-    q_rank: float, q_est: float,
-    period_days_grid: np.ndarray, rankable_rd: float, white_adv_elo: float,
-    tau: float, warmup_games: int, min_idle_days: float,
+    white_ids: np.ndarray,
+    black_ids: np.ndarray,
+    scores: np.ndarray,
+    days: np.ndarray,
+    ref_rd_w: np.ndarray,
+    ref_rd_b: np.ndarray,
+    n_players: int,
+    prov_target_n: int,
+    est_target_n: int,
+    rank_target_n: int,
+    period_days_grid: np.ndarray,
+    rankable_rd: float,
+    white_adv_elo: float,
+    tau: float,
+    warmup_games: int,
+    min_idle_days: float,
 ):
     n_p = len(period_days_grid)
     metrics = np.empty((n_p, 18), dtype=np.float64)
@@ -63,9 +74,16 @@ def _sweep_parallel(
 
     for idx in prange(n_p):
         m_row, c_row = evaluate_rating_period(
-            white_ids, black_ids, scores, days, ref_rd_w, ref_rd_b, n_players,
-            q_rank=q_rank,
-            q_est=q_est,
+            white_ids,
+            black_ids,
+            scores,
+            days,
+            ref_rd_w,
+            ref_rd_b,
+            n_players,
+            prov_target_n=prov_target_n,
+            est_target_n=est_target_n,
+            rank_target_n=rank_target_n,
             rating_period_days=period_days_grid[idx],
             rankable_rd=rankable_rd,
             white_adv_elo=white_adv_elo,
@@ -80,21 +98,48 @@ def _sweep_parallel(
 
 
 def sweep_rating_periods(
-    white_ids: np.ndarray, black_ids: np.ndarray, scores: np.ndarray, days: np.ndarray,
-    n_players: int, period_days_grid: np.ndarray,
+    white_ids: np.ndarray,
+    black_ids: np.ndarray,
+    scores: np.ndarray,
+    days: np.ndarray,
+    n_players: int,
+    period_days_grid: np.ndarray,
     rankable_rd: float = STANDARD_RANKABLE_RD,
     white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
-    tau: float = TAU, warmup_games: int = 500_000, min_idle_days: float = 0.0,
+    tau: float = TAU,
+    warmup_games: int = 500_000,
+    min_idle_days: float = 0.0,
 ):
-    """Computes baseline reference RDs & target quantiles once, then sweeps all rating periods in parallel."""
-    ref_rd_w, ref_rd_b, q_rank, q_est = compute_reference_rds(
-        white_ids, black_ids, scores, days, n_players,
-        rankable_rd=rankable_rd, white_adv_elo=white_adv_elo, tau=tau,
-        warmup_games=warmup_games, min_idle_days=min_idle_days,
+    """Computes baseline reference RDs & target player cohort counts once, then sweeps in parallel."""
+    ref_rd_w, ref_rd_b, prov_target_n, est_target_n, rank_target_n = compute_reference_rds(
+        white_ids,
+        black_ids,
+        scores,
+        days,
+        n_players,
+        rankable_rd=rankable_rd,
+        white_adv_elo=white_adv_elo,
+        tau=tau,
+        warmup_games=warmup_games,
+        min_idle_days=min_idle_days,
     )
     return _sweep_parallel(
-        white_ids, black_ids, scores, days, ref_rd_w, ref_rd_b, n_players,
-        q_rank, q_est, period_days_grid, rankable_rd, white_adv_elo, tau, warmup_games, min_idle_days,
+        white_ids,
+        black_ids,
+        scores,
+        days,
+        ref_rd_w,
+        ref_rd_b,
+        n_players,
+        prov_target_n,
+        est_target_n,
+        rank_target_n,
+        period_days_grid,
+        rankable_rd,
+        white_adv_elo,
+        tau,
+        warmup_games,
+        min_idle_days,
     )
 
 
