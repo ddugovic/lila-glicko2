@@ -190,7 +190,7 @@ if __name__ == "__main__":
     part_tag = first_part if len(partitions) == 1 else f"{first_part}-to-{partitions[-1]}"
     date_tag = f"_{args.start_date or 'start'}_to_{args.end_date or 'end'}" if (args.start_date or args.end_date) else ""
 
-    grid = np.unique(np.r_[0.5:4.26:0.25, LILA_RATING_PERIOD_DAYS, 4.75, 5.0:10.01:0.5])
+    grid = np.unique(np.r_[0.5:4.51:0.25, LILA_RATING_PERIOD_DAYS, 4.75, 5.0:10.01:0.5])
 
     try:
         datasets = prepare_datasets(
