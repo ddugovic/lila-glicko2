@@ -8,9 +8,9 @@ from glicko2_calc import LILA_RATING_PERIOD_DAYS
 COHORTS = [
     ("Game-Weighted (All Games)", "game_ll", "game_brier", "eval_games", "games"),
     ("Player-Weighted (All Players)", "player_ll", "player_brier", "all_players", "players"),
-    ("Player-Weighted: Provisional (Unlocked)", "prov_ll", "prov_brier", "prov_players", "players"),
-    ("Player-Weighted: Established (Unlocked)", "est_ll", "est_brier", "est_players", "players"),
-    ("Player-Weighted: Rankable (Unlocked)", "rankable_ll", "rankable_brier", "rankable_players", "players"),
+    ("Player-Weighted: Provisional (Percentile)", "prov_ll", "prov_brier", "prov_players", "players"),
+    ("Player-Weighted: Established (Percentile)", "est_ll", "est_brier", "est_players", "players"),
+    ("Player-Weighted: Rankable (Percentile)", "rankable_ll", "rankable_brier", "rankable_players", "players"),
     ("Player-Weighted: Provisional (Locked)", "prov_locked_ll", "prov_locked_brier", "prov_locked_players", "players"),
     ("Player-Weighted: Established (Locked)", "est_locked_ll", "est_locked_brier", "est_locked_players", "players"),
     ("Player-Weighted: Rankable (Locked)", "rankable_locked_ll", "rankable_locked_brier", "rankable_locked_players", "players"),

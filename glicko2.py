@@ -1,15 +1,14 @@
 import duckdb
 import numpy as np
 from numba import get_num_threads, njit, prange
-from glicko2_math import (
+from glicko2_calc import (
     LILA_RATING_PERIOD_DAYS,
     STANDARD_COLOR_ADV_ELO,
     STANDARD_RANKABLE_RD,
     TAU,
     VARIANT_RANKABLE_RD,
-    compute_reference_rds,
-    evaluate_rating_period,
 )
+from glicko2_math import compute_reference_rds, evaluate_rating_period
 
 
 def load_encoded_games(parquet_path: str):
@@ -54,6 +53,7 @@ def load_encoded_games(parquet_path: str):
 def _sweep_parallel(
     white_ids: np.ndarray, black_ids: np.ndarray, scores: np.ndarray, days: np.ndarray,
     ref_rd_w: np.ndarray, ref_rd_b: np.ndarray, n_players: int,
+    q_rank: float, q_est: float,
     period_days_grid: np.ndarray, rankable_rd: float, white_adv_elo: float,
     tau: float, warmup_games: int, min_idle_days: float,
 ):
@@ -64,6 +64,8 @@ def _sweep_parallel(
     for idx in prange(n_p):
         m_row, c_row = evaluate_rating_period(
             white_ids, black_ids, scores, days, ref_rd_w, ref_rd_b, n_players,
+            q_rank=q_rank,
+            q_est=q_est,
             rating_period_days=period_days_grid[idx],
             rankable_rd=rankable_rd,
             white_adv_elo=white_adv_elo,
@@ -84,15 +86,18 @@ def sweep_rating_periods(
     white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
     tau: float = TAU, warmup_games: int = 500_000, min_idle_days: float = 0.0,
 ):
-    """Computes baseline reference RDs once, then sweeps all rating periods in parallel."""
-    ref_rd_w, ref_rd_b = compute_reference_rds(
-        white_ids, black_ids, scores, days, n_players, white_adv_elo=white_adv_elo, tau=tau
+    """Computes baseline reference RDs & target quantiles once, then sweeps all rating periods in parallel."""
+    ref_rd_w, ref_rd_b, q_rank, q_est = compute_reference_rds(
+        white_ids, black_ids, scores, days, n_players,
+        rankable_rd=rankable_rd, white_adv_elo=white_adv_elo, tau=tau,
+        warmup_games=warmup_games, min_idle_days=min_idle_days,
     )
     return _sweep_parallel(
         white_ids, black_ids, scores, days, ref_rd_w, ref_rd_b, n_players,
-        period_days_grid, rankable_rd, white_adv_elo, tau, warmup_games, min_idle_days,
+        q_rank, q_est, period_days_grid, rankable_rd, white_adv_elo, tau, warmup_games, min_idle_days,
     )
 
 
 def active_numba_threads() -> int:
     return get_num_threads()
+

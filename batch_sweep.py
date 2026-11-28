@@ -108,9 +108,9 @@ def run_sweep(
     cohorts = [
         ("Game-Weighted (All Games)", 0, 1, 0),
         ("Player-Weighted (All Players)", 2, 3, 1),
-        ("Player-Weighted: Provisional (RD >= 110, Unlocked)", 4, 5, 2),
-        ("Player-Weighted: Established (RD < 110, Unlocked)", 6, 7, 3),
-        (f"Player-Weighted: Rankable (RD <= {rankable_rd:.0f}, Unlocked)", 8, 9, 4),
+        ("Player-Weighted: Provisional (Percentile-Matched)", 4, 5, 2),
+        ("Player-Weighted: Established (Percentile-Matched)", 6, 7, 3),
+        (f"Player-Weighted: Rankable <= {rankable_rd:.0f} (Percentile-Matched)", 8, 9, 4),
         ("Player-Weighted: Provisional (RD >= 110, Locked Baseline)", 10, 11, 5),
         ("Player-Weighted: Established (RD < 110, Locked Baseline)", 12, 13, 6),
         (f"Player-Weighted: Rankable (RD <= {rankable_rd:.0f}, Locked Baseline)", 14, 15, 7),
