@@ -1,4 +1,5 @@
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 import os
 import time
 import duckdb
@@ -34,6 +35,14 @@ def list_available_partitions(targets: list[tuple[str, str]], hf_token: str | No
             print(f"  {year}: {status}")
 
 
+def _cleanup_hf_file(local_raw: str):
+    real_blob = os.path.realpath(local_raw)
+    if os.path.exists(local_raw):
+        os.remove(local_raw)
+    if os.path.exists(real_blob):
+        os.remove(real_blob)
+
+
 def prepare_datasets(
     targets: list[tuple[str, str]],
     partitions: list[str],
@@ -43,7 +52,9 @@ def prepare_datasets(
     end_date: str | None = None,
     refresh: bool = False,
     hf_token: str | None = None,
+    batch_size: int = 4,
 ) -> dict[tuple[str, str], tuple[str, str]]:
+    """Groups (category, speed) targets by HF repo_id and downloads shards in bounded parallel batches."""
     ready: dict[tuple[str, str], tuple[str, str]] = {}
     by_repo: dict[str, list[tuple[str, str, str, str]]] = defaultdict(list)
 
@@ -67,9 +78,12 @@ def prepare_datasets(
 
     base_where = [
         "Result IN ('1-0', '0-1', '1/2-1/2')",
-        "White IS NOT NULL", "Black IS NOT NULL",
-        "WhiteRatingDiff IS NOT NULL", "BlackRatingDiff IS NOT NULL",
-        "UTCDate IS NOT NULL", "UTCTime IS NOT NULL",
+        "White IS NOT NULL",
+        "Black IS NOT NULL",
+        "WhiteRatingDiff IS NOT NULL",
+        "BlackRatingDiff IS NOT NULL",
+        "UTCDate IS NOT NULL",
+        "UTCTime IS NOT NULL",
     ]
     if start_date:
         base_where.append(f"UTCDate >= DATE '{start_date}'")
@@ -92,40 +106,47 @@ def prepare_datasets(
             continue
 
         total_bytes = sum(s.size or 0 for s in shards)
-        done_bytes = 0
         desc = ", ".join(f"{c}/{s}" for c, s, _, _ in repo_targets)
-        print(f"Streaming {len(shards)} shard(s) from {repo_id} for [{desc}] ({total_bytes / 1e9:.2f} GB)...")
+        print(f"Streaming {len(shards)} shard(s) ({total_bytes / 1e9:.2f} GB) from {repo_id} for [{desc}]...")
         t0 = time.perf_counter()
         parts_by_target: dict[tuple[str, str], list[str]] = defaultdict(list)
 
         try:
-            for idx, shard in enumerate(shards, 1):
-                rel_path = shard.path
-                shard_bytes = shard.size or 0
-                done_bytes += shard_bytes
-                print(f"  [{idx}/{len(shards)}] Downloading {rel_path} ({shard_bytes / 1e6:.1f} MB)...")
-                local_raw = hf_hub_download(repo_id=repo_id, repo_type="dataset", filename=rel_path, token=hf_token)
-                try:
-                    for cat, speed, _, _ in repo_targets:
-                        part_path = f".tmp_{cat}_{speed}_{idx:04d}.parquet"
-                        con.execute(f"""
-                        COPY (
-                            SELECT
-                                White AS white, Black AS black,
-                                CASE Result WHEN '1-0' THEN 1.0 WHEN '0-1' THEN 0.0 WHEN '1/2-1/2' THEN 0.5 END AS score,
-                                epoch(UTCDate::DATE + UTCTime::TIME) AS timestamp,
-                                WhiteElo AS white_elo, BlackElo AS black_elo, TimeControl AS time_control
-                            FROM read_parquet('{local_raw}')
-                            WHERE {base_where_sql} {speed_where_clause(speed)}
-                        ) TO '{part_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-                        """)
-                        parts_by_target[(cat, speed)].append(part_path)
-                finally:
-                    real_blob = os.path.realpath(local_raw)
-                    if os.path.exists(local_raw):
-                        os.remove(local_raw)
-                    if os.path.exists(real_blob):
-                        os.remove(real_blob)
+            for batch_start in range(0, len(shards), batch_size):
+                batch = shards[batch_start : batch_start + batch_size]
+                for offset, shard in enumerate(batch):
+                    idx = batch_start + offset + 1
+                    print(f"  [{idx}/{len(shards)}] Downloading {shard.path} ({(shard.size or 0) / 1e6:.1f} MB)...")
+
+                with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+                    local_paths = list(
+                        pool.map(
+                            lambda s: hf_hub_download(
+                                repo_id=repo_id, repo_type="dataset", filename=s.path, token=hf_token
+                            ),
+                            batch,
+                        )
+                    )
+
+                for offset, local_raw in enumerate(local_paths):
+                    idx = batch_start + offset + 1
+                    try:
+                        for cat, speed, _, _ in repo_targets:
+                            part_path = f".tmp_{cat}_{speed}_{idx:04d}.parquet"
+                            con.execute(f"""
+                            COPY (
+                                SELECT
+                                    White AS white, Black AS black,
+                                    CASE Result WHEN '1-0' THEN 1.0 WHEN '0-1' THEN 0.0 WHEN '1/2-1/2' THEN 0.5 END AS score,
+                                    epoch(UTCDate::DATE + UTCTime::TIME) AS timestamp,
+                                    WhiteElo AS white_elo, BlackElo AS black_elo, TimeControl AS time_control
+                                FROM read_parquet('{local_raw}')
+                                WHERE {base_where_sql} {speed_where_clause(speed)}
+                            ) TO '{part_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                            """)
+                            parts_by_target[(cat, speed)].append(part_path)
+                    finally:
+                        _cleanup_hf_file(local_raw)
 
             for cat, speed, label, out_path in repo_targets:
                 con.execute(f"""
