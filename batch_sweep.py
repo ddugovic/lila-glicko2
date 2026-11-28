@@ -7,14 +7,20 @@ from benchmark import estimate_sweep_seconds, format_duration
 from dataset_loader import list_available_partitions, prepare_datasets
 from glicko2 import (
     LILA_RATING_PERIOD_DAYS,
-    STANDARD_COLOR_ADV_ELO,
     STANDARD_RANKABLE_RD,
     VARIANT_RANKABLE_RD,
     active_numba_threads,
     load_encoded_games,
     sweep_rating_periods,
 )
-from partitions import CATEGORY_REPOS, STANDARD_SPEEDS, VALID_SPEEDS, expand_partitions, resolve_targets
+from partitions import (
+    CATEGORY_REPOS,
+    COLOR_ADV_ELO,
+    STANDARD_SPEEDS,
+    VALID_SPEEDS,
+    expand_partitions,
+    resolve_targets,
+)
 
 
 def delta_log_loss_to_elo(delta_ll: float) -> float:
@@ -25,7 +31,17 @@ def delta_log_loss_to_elo(delta_ll: float) -> float:
     return scale * math.sqrt(2.0 * delta_ll)
 
 
-def _write_ranked_table(f, title: str, n_units: int, unit_label: str, grid: np.ndarray, log_losses: np.ndarray, brier_scores: np.ndarray, lila_idx: int, top_k: int):
+def _write_ranked_table(
+    f,
+    title: str,
+    n_units: int,
+    unit_label: str,
+    grid: np.ndarray,
+    log_losses: np.ndarray,
+    brier_scores: np.ndarray,
+    lila_idx: int,
+    top_k: int,
+):
     if np.all(np.isnan(log_losses)) or n_units == 0:
         return
     ranked = np.argsort(log_losses)
@@ -54,7 +70,7 @@ def run_sweep(
     path: str,
     grid: np.ndarray,
     rankable_rd: float = STANDARD_RANKABLE_RD,
-    white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
+    white_adv_elo: float = 0.0,
     warmup_days: float | None = None,
     min_idle_days: float = 0.0,
     summary_path: str | None = None,
@@ -75,8 +91,16 @@ def run_sweep(
 
     t1 = time.perf_counter()
     metrics, counts = sweep_rating_periods(
-        white_ids, black_ids, scores, days, n_players, grid,
-        rankable_rd=rankable_rd, white_adv_elo=white_adv_elo, warmup_games=warmup, min_idle_days=min_idle_days,
+        white_ids,
+        black_ids,
+        scores,
+        days,
+        n_players,
+        grid,
+        rankable_rd=rankable_rd,
+        white_adv_elo=white_adv_elo,
+        warmup_games=warmup,
+        min_idle_days=min_idle_days,
     )
     elapsed = time.perf_counter() - t1
     lila_idx = int(np.argmin(np.abs(grid - LILA_RATING_PERIOD_DAYS)))
@@ -98,7 +122,10 @@ def run_sweep(
             continue
         best_idx = int(np.nanargmin(ll_arr))
         d_elo = delta_log_loss_to_elo(float(ll_arr[lila_idx] - ll_arr[best_idx]))
-        print(f"  [{title}] n={n_units:,} | #1={grid[best_idx]:.3f}d (LL={ll_arr[best_idx]:.6f}, Brier={bs_arr[best_idx]:.6f}) | Lila (+{d_elo:.2f} Elo)")
+        print(
+            f"  [{title}] n={n_units:,} | #1={grid[best_idx]:.3f}d "
+            f"(LL={ll_arr[best_idx]:.6f}, Brier={bs_arr[best_idx]:.6f}) | Lila (+{d_elo:.2f} Elo)"
+        )
 
     if csv_path:
         with open(csv_path, "w", encoding="utf-8") as f:
@@ -119,8 +146,15 @@ def run_sweep(
             for idx_c, (title, ll_col, bs_col, cnt_col) in enumerate(cohorts):
                 unit_label = "games" if idx_c == 0 else "players"
                 _write_ranked_table(
-                    f, title, int(counts[lila_idx, cnt_col]), unit_label,
-                    grid, metrics[:, ll_col], metrics[:, bs_col], lila_idx, top_k,
+                    f,
+                    title,
+                    int(counts[lila_idx, cnt_col]),
+                    unit_label,
+                    grid,
+                    metrics[:, ll_col],
+                    metrics[:, bs_col],
+                    lila_idx,
+                    top_k,
                 )
 
 
@@ -133,7 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("--end-date", type=str, default=None)
     parser.add_argument("--warmup-days", type=float, default=None)
     parser.add_argument("--min-idle-days", type=float, default=0.0)
-    parser.add_argument("--white-adv-elo", type=float, default=None, help="Override White advantage in Elo (default: 11.782457 for standard, 0.0 for variants)")
+    parser.add_argument("--white-adv-elo", type=float, default=None, help="Override White advantage in Elo (defaults to COLOR_ADV_ELO map)")
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--list-partitions", action="store_true")
     parser.add_argument("--summary", type=str, default=os.environ.get("GITHUB_STEP_SUMMARY"))
@@ -155,19 +189,31 @@ if __name__ == "__main__":
 
     try:
         datasets = prepare_datasets(
-            targets=targets, partitions=partitions, part_tag=part_tag, date_tag=date_tag,
-            start_date=args.start_date, end_date=args.end_date, refresh=args.refresh, hf_token=os.environ.get("HF_TOKEN"),
+            targets=targets,
+            partitions=partitions,
+            part_tag=part_tag,
+            date_tag=date_tag,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            refresh=args.refresh,
+            hf_token=os.environ.get("HF_TOKEN"),
         )
         for cat, speed in targets:
             if (cat, speed) in datasets:
                 label, parquet_path = datasets[(cat, speed)]
                 rankable_rd = STANDARD_RANKABLE_RD if cat == "standard" else VARIANT_RANKABLE_RD
-                default_adv = STANDARD_COLOR_ADV_ELO if cat == "standard" else 0.0
+                default_adv = COLOR_ADV_ELO.get(cat, 0.0)
                 white_adv = args.white_adv_elo if args.white_adv_elo is not None else default_adv
                 run_sweep(
-                    label, parquet_path, grid, rankable_rd=rankable_rd, white_adv_elo=white_adv,
-                    warmup_days=args.warmup_days, min_idle_days=args.min_idle_days,
-                    summary_path=args.summary, csv_path=f"{label}_sweep.csv",
+                    label,
+                    parquet_path,
+                    grid,
+                    rankable_rd=rankable_rd,
+                    white_adv_elo=white_adv,
+                    warmup_days=args.warmup_days,
+                    min_idle_days=args.min_idle_days,
+                    summary_path=args.summary,
+                    csv_path=f"{label}_sweep.csv",
                 )
     except KeyboardInterrupt:
         print("\nInterrupted; keeping results from completed sweeps.")
