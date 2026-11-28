@@ -51,8 +51,8 @@ on:
 env:
   HF_TOKEN: ${{ secrets.HF_TOKEN }}
   PYTHONUNBUFFERED: "1"
-  CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'standard' }}
-  SPEED: ${{ github.event_name == 'workflow_dispatch' && inputs.speed || 'classical' }}
+  CATEGORY: ${{ github.event_name == 'workflow_dispatch' && inputs.category || 'all' }}
+  SPEED: ${{ github.event_name == 'workflow_dispatch' && inputs.speed || 'all' }}
   PARTITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.partitions || '2013' }}
   WARMUP_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
 
