@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from glicko2 import LILA_RATING_PERIOD_DAYS
+from glicko2_calc import LILA_RATING_PERIOD_DAYS, PROVISIONAL_RD
 
 
 def delta_log_loss_to_elo(delta_ll: float) -> float:
@@ -15,11 +15,11 @@ def build_cohorts(rankable_rd: float):
     return [
         ("Game-Weighted (All Games)", 0, 1, 0, None),
         ("Player-Weighted (All Players)", 2, 3, 1, None),
-        ("Player-Weighted: Provisional (Percentile-Matched)", 4, 5, 2, 16),
-        ("Player-Weighted: Established (Percentile-Matched)", 6, 7, 3, 16),
+        (f"Player-Weighted: Provisional >= {PROVISIONAL_RD:.0f} (Percentile-Matched)", 4, 5, 2, 16),
+        (f"Player-Weighted: Established < {PROVISIONAL_RD:.0f} (Percentile-Matched)", 6, 7, 3, 16),
         (f"Player-Weighted: Rankable <= {rankable_rd:.0f} (Percentile-Matched)", 8, 9, 4, 17),
-        ("Player-Weighted: Provisional (RD >= 110, Locked Baseline)", 10, 11, 5, None),
-        ("Player-Weighted: Established (RD < 110, Locked Baseline)", 12, 13, 6, None),
+        (f"Player-Weighted: Provisional (RD >= {PROVISIONAL_RD:.0f}, Locked Baseline)", 10, 11, 5, None),
+        (f"Player-Weighted: Established (RD < {PROVISIONAL_RD:.0f}, Locked Baseline)", 12, 13, 6, None),
         (f"Player-Weighted: Rankable (RD <= {rankable_rd:.0f}, Locked Baseline)", 14, 15, 7, None),
     ]
 
