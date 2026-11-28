@@ -78,22 +78,32 @@ def prepare_datasets(
     base_where_sql = " AND ".join(base_where)
 
     for repo_id, repo_targets in by_repo.items():
-        repo_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
-        shard_paths = [
-            f for prefix in prefixes for f in repo_files if f.startswith(prefix) and f.endswith(".parquet")
+        repo_entries = api.list_repo_tree(repo_id=repo_id, repo_type="dataset", recursive=True)
+        shards = [
+            entry
+            for entry in repo_entries
+            if hasattr(entry, "size")
+            and entry.size is not None
+            and any(entry.path.startswith(prefix) for prefix in prefixes)
+            and entry.path.endswith(".parquet")
         ]
-        if not shard_paths:
+        if not shards:
             print(f"  Skipping {', '.join(f'{c}/{s}' for c, s, _, _ in repo_targets)}: no shards found in {repo_id}.")
             continue
 
+        total_bytes = sum(s.size or 0 for s in shards)
+        done_bytes = 0
         desc = ", ".join(f"{c}/{s}" for c, s, _, _ in repo_targets)
-        print(f"Streaming {len(shard_paths)} shard(s) 1-by-1 from {repo_id} for [{desc}]...")
+        print(f"Streaming {len(shards)} shard(s) from {repo_id} for [{desc}] ({total_bytes / 1e9:.2f} GB)...")
         t0 = time.perf_counter()
         parts_by_target: dict[tuple[str, str], list[str]] = defaultdict(list)
 
         try:
-            for idx, rel_path in enumerate(shard_paths, 1):
-                print(f"  [{idx}/{len(shard_paths)}] Downloading {rel_path}...")
+            for idx, shard in enumerate(shards, 1):
+                rel_path = shard.path
+                shard_bytes = shard.size or 0
+                done_bytes += shard_bytes
+                print(f"  [{idx}/{len(shards)}] Downloading {rel_path} ({shard_bytes / 1e6:.1f} MB)...")
                 local_raw = hf_hub_download(repo_id=repo_id, repo_type="dataset", filename=rel_path, token=hf_token)
                 try:
                     for cat, speed, _, _ in repo_targets:
