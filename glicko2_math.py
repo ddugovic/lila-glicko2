@@ -3,19 +3,19 @@ import numpy as np
 from numba import njit
 
 # Exact constants from lila (lichess)
-GLICKO2_SCALE = 173.7178       # 400 / ln(10)
+GLICKO2_SCALE = 173.7178           # 400 / ln(10)
 INIT_RATING = 1500.0
 MIN_RATING = 400.0
 MAX_RATING = 4000.0
 
 MIN_RD = 45.0
-MAX_RD = 500.0                 # lila: maxDeviation = 500d
-PROVISIONAL_RD = 110.0         # lila: ? mark threshold
-ACTIVE_RD = 75.0               # lila: leaderboard RD threshold
-ACTIVE_DAYS = 7.0              # lila: active within 7 days
-INIT_VOL = 0.09                # lila: defaultVolatility = 0.09d
-MAX_VOL = 0.1                  # lila: maxVolatility = 0.1d
-TAU = 0.75                     # lila system constant
+MAX_RD = 500.0                     # lila: maxDeviation = 500d
+PROVISIONAL_RD = 110.0             # lila: ? mark threshold
+STANDARD_RANKABLE_RD = 75.0        # lila: standardRankableDeviation = 75
+VARIANT_RANKABLE_RD = 65.0         # lila: variantRankableDeviation = 65
+INIT_VOL = 0.09                    # lila: defaultVolatility = 0.09d
+MAX_VOL = 0.1                      # lila: maxVolatility = 0.1d
+TAU = 0.75                         # lila system constant
 EPSILON = 1e-6
 LILA_RATING_PERIOD_DAYS = 1.0 / 0.21436  # ~4.66505 days
 
@@ -148,14 +148,15 @@ def evaluate_rating_period(
     days: np.ndarray,
     n_players: int,
     rating_period_days: float = LILA_RATING_PERIOD_DAYS,
+    rankable_rd: float = STANDARD_RANKABLE_RD,
     tau: float = TAU,
     warmup_games: int = 500_000,
     min_idle_days: float = 0.0,
 ):
     """
     Simulate full game stream and return:
-    (game_ll, game_bs, all_p_ll, all_p_bs, prov_ll, prov_bs, est_ll, est_bs, act_ll, act_bs,
-     eval_games, all_p_cnt, prov_cnt, est_cnt, act_cnt).
+    (game_ll, game_bs, all_p_ll, all_p_bs, prov_ll, prov_bs, est_ll, est_bs, rank_ll, rank_bs,
+     eval_games, all_p_cnt, prov_cnt, est_cnt, rank_cnt).
     """
     min_mu = (MIN_RATING - INIT_RATING) / GLICKO2_SCALE
     max_mu = (MAX_RATING - INIT_RATING) / GLICKO2_SCALE
@@ -179,9 +180,9 @@ def evaluate_rating_period(
     est_bs_sum = np.zeros(n_players, dtype=np.float64)
     est_cnt = np.zeros(n_players, dtype=np.int32)
 
-    act_ll_sum = np.zeros(n_players, dtype=np.float64)
-    act_bs_sum = np.zeros(n_players, dtype=np.float64)
-    act_cnt = np.zeros(n_players, dtype=np.int32)
+    rank_ll_sum = np.zeros(n_players, dtype=np.float64)
+    rank_bs_sum = np.zeros(n_players, dtype=np.float64)
+    rank_cnt = np.zeros(n_players, dtype=np.int32)
 
     total_log_loss = 0.0
     total_brier = 0.0
@@ -225,7 +226,7 @@ def evaluate_rating_period(
                 all_bs_sum[b] += game_bs
                 all_cnt[b] += 1
 
-                # White RD cohorts
+                # White RD cohorts (lila: provisional >= 110, established < 110, rankable <= 75 / 65)
                 rd_w = phi_star_w * GLICKO2_SCALE
                 if rd_w >= PROVISIONAL_RD:
                     prov_ll_sum[w] += game_ll
@@ -235,10 +236,10 @@ def evaluate_rating_period(
                     est_ll_sum[w] += game_ll
                     est_bs_sum[w] += game_bs
                     est_cnt[w] += 1
-                    if rd_w < ACTIVE_RD and 0.0 <= dt_w <= ACTIVE_DAYS:
-                        act_ll_sum[w] += game_ll
-                        act_bs_sum[w] += game_bs
-                        act_cnt[w] += 1
+                    if rd_w <= rankable_rd:
+                        rank_ll_sum[w] += game_ll
+                        rank_bs_sum[w] += game_bs
+                        rank_cnt[w] += 1
 
                 # Black RD cohorts
                 rd_b = phi_star_b * GLICKO2_SCALE
@@ -250,10 +251,10 @@ def evaluate_rating_period(
                     est_ll_sum[b] += game_ll
                     est_bs_sum[b] += game_bs
                     est_cnt[b] += 1
-                    if rd_b < ACTIVE_RD and 0.0 <= dt_b <= ACTIVE_DAYS:
-                        act_ll_sum[b] += game_ll
-                        act_bs_sum[b] += game_bs
-                        act_cnt[b] += 1
+                    if rd_b <= rankable_rd:
+                        rank_ll_sum[b] += game_ll
+                        rank_bs_sum[b] += game_bs
+                        rank_cnt[b] += 1
 
         new_mu_w, new_phi_w, new_sigma_w = update_player_m1(
             mu_w, phi_star_w, sigma_w, mu_b, phi_star_b, s_w, tau, min_phi, min_mu, max_mu
@@ -270,14 +271,14 @@ def evaluate_rating_period(
     all_p_ll, all_p_bs, all_p_n = _macro_avg(all_ll_sum, all_bs_sum, all_cnt)
     prov_ll, prov_bs, prov_n = _macro_avg(prov_ll_sum, prov_bs_sum, prov_cnt)
     est_ll, est_bs, est_n = _macro_avg(est_ll_sum, est_bs_sum, est_cnt)
-    act_ll, act_bs, act_n = _macro_avg(act_ll_sum, act_bs_sum, act_cnt)
+    rank_ll, rank_bs, rank_n = _macro_avg(rank_ll_sum, rank_bs_sum, rank_cnt)
 
     return (
         game_ll_avg, game_bs_avg,
         all_p_ll, all_p_bs,
         prov_ll, prov_bs,
         est_ll, est_bs,
-        act_ll, act_bs,
-        eval_count, all_p_n, prov_n, est_n, act_n,
+        rank_ll, rank_bs,
+        eval_count, all_p_n, prov_n, est_n, rank_n,
     )
 

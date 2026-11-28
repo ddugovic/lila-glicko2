@@ -1,7 +1,13 @@
 import duckdb
 import numpy as np
 from numba import get_num_threads, njit, prange
-from glicko2_math import LILA_RATING_PERIOD_DAYS, TAU, evaluate_rating_period
+from glicko2_math import (
+    LILA_RATING_PERIOD_DAYS,
+    STANDARD_RANKABLE_RD,
+    TAU,
+    VARIANT_RANKABLE_RD,
+    evaluate_rating_period,
+)
 
 
 def load_encoded_games(parquet_path: str):
@@ -50,6 +56,7 @@ def sweep_rating_periods(
     days: np.ndarray,
     n_players: int,
     period_days_grid: np.ndarray,
+    rankable_rd: float = STANDARD_RANKABLE_RD,
     tau: float = TAU,
     warmup_games: int = 500_000,
     min_idle_days: float = 0.0,
@@ -74,6 +81,7 @@ def sweep_rating_periods(
             days,
             n_players,
             rating_period_days=period_days_grid[idx],
+            rankable_rd=rankable_rd,
             tau=tau,
             warmup_games=warmup_games,
             min_idle_days=min_idle_days,

@@ -4,16 +4,15 @@ import os
 import time
 import numpy as np
 from dataset_loader import list_available_partitions, prepare_datasets
-from glicko2 import LILA_RATING_PERIOD_DAYS, active_numba_threads, load_encoded_games, sweep_rating_periods
+from glicko2 import (
+    LILA_RATING_PERIOD_DAYS,
+    STANDARD_RANKABLE_RD,
+    VARIANT_RANKABLE_RD,
+    active_numba_threads,
+    load_encoded_games,
+    sweep_rating_periods,
+)
 from partitions import CATEGORY_REPOS, STANDARD_SPEEDS, VALID_SPEEDS, expand_partitions, resolve_targets
-
-COHORTS = [
-    ("Game-Weighted (All Games)", 0, 1, 0),
-    ("Player-Weighted (All Players)", 2, 3, 1),
-    ("Player-Weighted: Provisional (RD >= 110)", 4, 5, 2),
-    ("Player-Weighted: Established (RD < 110)", 6, 7, 3),
-    ("Player-Weighted: Active (RD < 75, <= 7d)", 8, 9, 4),
-]
 
 
 def delta_log_loss_to_elo(delta_ll: float) -> float:
@@ -52,6 +51,7 @@ def run_sweep(
     name: str,
     path: str,
     grid: np.ndarray,
+    rankable_rd: float = STANDARD_RANKABLE_RD,
     warmup_days: float | None = None,
     min_idle_days: float = 0.0,
     summary_path: str | None = None,
@@ -64,17 +64,26 @@ def run_sweep(
     print(f"Loaded {len(scores):,} games ({n_players:,} players) in {time.perf_counter() - t0:.2f}s")
 
     warmup = int(np.searchsorted(days, days + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
-    print(f"Warmup: {warmup:,} games | Min idle filter: {min_idle_days:.2f}d")
+    print(f"Warmup: {warmup:,} games | Min idle filter: {min_idle_days:.2f}d | Rankable RD <= {rankable_rd:.0f}")
 
     t1 = time.perf_counter()
     metrics, counts = sweep_rating_periods(
-        white_ids, black_ids, scores, days, n_players, grid, warmup_games=warmup, min_idle_days=min_idle_days
+        white_ids, black_ids, scores, days, n_players, grid,
+        rankable_rd=rankable_rd, warmup_games=warmup, min_idle_days=min_idle_days,
     )
     elapsed = time.perf_counter() - t1
     lila_idx = int(np.argmin(np.abs(grid - LILA_RATING_PERIOD_DAYS)))
 
+    cohorts = [
+        ("Game-Weighted (All Games)", 0, 1, 0),
+        ("Player-Weighted (All Players)", 2, 3, 1),
+        ("Player-Weighted: Provisional (RD >= 110)", 4, 5, 2),
+        ("Player-Weighted: Established (RD < 110)", 6, 7, 3),
+        (f"Player-Weighted: Rankable (RD <= {rankable_rd:.0f})", 8, 9, 4),
+    ]
+
     print(f"Swept {len(grid)} values in {elapsed:.2f}s ({elapsed / len(grid):.3f}s/run)")
-    for title, ll_col, bs_col, cnt_col in COHORTS:
+    for title, ll_col, bs_col, cnt_col in cohorts:
         ll_arr = metrics[:, ll_col]
         bs_arr = metrics[:, bs_col]
         n_units = int(counts[lila_idx, cnt_col])
@@ -88,8 +97,8 @@ def run_sweep(
         with open(csv_path, "w", encoding="utf-8") as f:
             f.write(
                 "dataset,period_days,game_ll,game_brier,player_ll,player_brier,"
-                "prov_ll,prov_brier,est_ll,est_brier,act_ll,act_brier,"
-                "eval_games,all_players,prov_players,est_players,act_players\n"
+                "prov_ll,prov_brier,est_ll,est_brier,rankable_ll,rankable_brier,"
+                "eval_games,all_players,prov_players,est_players,rankable_players\n"
             )
             for idx, p in enumerate(grid):
                 m_str = ",".join(f"{val:.8f}" for val in metrics[idx])
@@ -100,7 +109,7 @@ def run_sweep(
         idle_note = f", min_idle={min_idle_days:.1f}d" if min_idle_days > 0 else ""
         with open(summary_path, "a", encoding="utf-8") as f:
             f.write(f"### Glicko-2 Sweep: `{name}` (warmup={warmup:,}{idle_note})\n\n")
-            for idx_c, (title, ll_col, bs_col, cnt_col) in enumerate(COHORTS):
+            for idx_c, (title, ll_col, bs_col, cnt_col) in enumerate(cohorts):
                 unit_label = "games" if idx_c == 0 else "players"
                 _write_ranked_table(
                     f, title, int(counts[lila_idx, cnt_col]), unit_label,
@@ -141,11 +150,12 @@ if __name__ == "__main__":
             targets=targets, partitions=partitions, part_tag=part_tag, date_tag=date_tag,
             start_date=args.start_date, end_date=args.end_date, refresh=args.refresh, hf_token=os.environ.get("HF_TOKEN"),
         )
-        for target in targets:
-            if target in datasets:
-                label, parquet_path = datasets[target]
+        for cat, speed in targets:
+            if (cat, speed) in datasets:
+                label, parquet_path = datasets[(cat, speed)]
+                rankable_rd = STANDARD_RANKABLE_RD if cat == "standard" else VARIANT_RANKABLE_RD
                 run_sweep(
-                    label, parquet_path, grid, warmup_days=args.warmup_days,
+                    label, parquet_path, grid, rankable_rd=rankable_rd, warmup_days=args.warmup_days,
                     min_idle_days=args.min_idle_days, summary_path=args.summary, csv_path=f"{label}_sweep.csv",
                 )
     except KeyboardInterrupt:
