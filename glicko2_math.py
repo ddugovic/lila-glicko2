@@ -225,11 +225,15 @@ def evaluate_rating_period(
                     bs_sums[3, u] += g_bs
                     cnts[3, u] += 1
 
-    out_m = np.empty(16, dtype=np.float64)
+    out_m = np.full(18, np.nan, dtype=np.float64)
     out_c = np.empty(8, dtype=np.int64)
     out_m[0] = (total_log_loss / eval_count) if eval_count > 0 else np.nan
     out_m[1] = (total_brier / eval_count) if eval_count > 0 else np.nan
     out_c[0] = eval_count
+
+    if n_obs > 0:
+        out_m[16] = rd_cut_est
+        out_m[17] = rd_cut_rank
 
     for k in range(7):
         m_ll, m_bs, n_act = _macro_avg(ll_sums[k], bs_sums[k], cnts[k])

@@ -58,7 +58,7 @@ def _sweep_parallel(
     tau: float, warmup_games: int, min_idle_days: float,
 ):
     n_p = len(period_days_grid)
-    metrics = np.empty((n_p, 16), dtype=np.float64)
+    metrics = np.empty((n_p, 18), dtype=np.float64)
     counts = np.empty((n_p, 8), dtype=np.int64)
 
     for idx in prange(n_p):
