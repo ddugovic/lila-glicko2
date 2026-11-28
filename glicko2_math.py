@@ -59,6 +59,8 @@ def evaluate_rating_period(
     ref_min_rd = np.full(n_players, 1e9, dtype=np.float64)
 
     total_log_loss, total_brier, eval_count = 0.0, 0.0, 0
+    first_eval_day = -1.0
+    last_eval_day = -1.0
 
     for i in range(len(scores)):
         w, b, s_w, t = white_ids[i], black_ids[i], scores[i], days[i]
@@ -74,6 +76,10 @@ def evaluate_rating_period(
         if i >= warmup_games:
             qualifies = True if min_idle_days <= 0.0 else ((dt_w >= min_idle_days) or (dt_b >= min_idle_days))
             if qualifies:
+                if first_eval_day < 0.0:
+                    first_eval_day = t
+                last_eval_day = t
+
                 p = min(max(e_pred, 1e-12), 1.0 - 1e-12)
                 g_ll = -(s_w * math.log(p) + (1.0 - s_w) * math.log(1.0 - p))
                 err = s_w - e_pred
@@ -112,6 +118,7 @@ def evaluate_rating_period(
         )
         last_played[w], last_played[b] = t, t
 
+    eval_span = (last_eval_day - first_eval_day) if first_eval_day >= 0.0 else 1.0
     return summarize_player_cohorts(
         all_ll_sum,
         all_bs_sum,
@@ -124,4 +131,6 @@ def evaluate_rating_period(
         est_target_n,
         rank_target_n,
         rankable_rd,
+        rating_period_days,
+        eval_span,
     )

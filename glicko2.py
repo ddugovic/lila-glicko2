@@ -68,7 +68,7 @@ def _sweep_parallel(
     min_idle_days: float,
 ):
     n_p = len(period_days_grid)
-    metrics = np.empty((n_p, 12), dtype=np.float64)
+    metrics = np.empty((n_p, 24), dtype=np.float64)
     counts = np.empty((n_p, 6), dtype=np.int64)
 
     for idx in prange(n_p):

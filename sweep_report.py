@@ -15,11 +15,11 @@ def delta_log_loss_to_elo(delta_ll: float) -> float:
 
 def build_cohorts():
     return [
-        ("Game-Weighted (All Games)", 0, 1, 0, None, ""),
-        ("Player-Weighted: Established", 2, 3, 2, 10, "Top"),
-        ("Player-Weighted: Rankable", 4, 5, 3, 11, "Top"),
-        ("Player-Weighted: Established", 6, 7, 4, None, "Locked"),
-        ("Player-Weighted: Rankable", 8, 9, 5, None, "Locked"),
+        ("Game-Weighted (All Games)", 0, 1, 0, None, None, ""),
+        ("Player-Weighted: Established", 2, 3, 2, 10, 12, "Top"),
+        ("Player-Weighted: Rankable", 4, 5, 3, 11, 15, "Top"),
+        ("Player-Weighted: Established", 6, 7, 4, None, 18, "Locked"),
+        ("Player-Weighted: Rankable", 8, 9, 5, None, 21, "Locked"),
     ]
 
 
@@ -34,6 +34,7 @@ def write_ranked_table(
     lila_idx: int,
     top_k: int,
     thresholds: np.ndarray | None = None,
+    gpp_quartiles: np.ndarray | None = None,
     scope: str = "",
 ):
     if np.all(np.isnan(log_losses)) or n_units == 0:
@@ -45,21 +46,27 @@ def write_ranked_table(
 
     count_str = f"{scope} {n_units:,} {unit_label}" if scope else f"{n_units:,} {unit_label}"
     f.write(f"#### {title} ({count_str})\n\n")
+
+    cols = ["Rank / Benchmark", "Rating Period (days)"]
     if thresholds is not None:
-        f.write("| Rank / Benchmark | Rating Period (days) | RD Cutoff | Log-Loss | Brier | Δ Elo vs. Best |\n")
-        f.write("| :--- | :---: | :---: | :---: | :---: | :---: |\n")
-    else:
-        f.write("| Rank / Benchmark | Rating Period (days) | Log-Loss | Brier | Δ Elo vs. Best |\n")
-        f.write("| :--- | :---: | :---: | :---: | :---: |\n")
+        cols.append("RD Cutoff")
+    if gpp_quartiles is not None:
+        cols.append("Games/Period (Q25/50/75)")
+    cols.extend(["Log-Loss", "Brier", "Δ Elo vs. Best"])
+
+    f.write("| " + " | ".join(cols) + " |\n")
+    f.write("| :--- | " + " | ".join([":---:"] * (len(cols) - 1)) + " |\n")
 
     def _row(label: str, idx: int) -> str:
         d_elo = delta_log_loss_to_elo(float(log_losses[idx]) - best_ll)
+        cells = [label, f"`{grid[idx]:.3f}d`"]
         if thresholds is not None:
-            return (
-                f"| {label} | `{grid[idx]:.3f}d` | `{thresholds[idx]:.1f}` | "
-                f"`{log_losses[idx]:.6f}` | `{brier_scores[idx]:.6f}` | `+{d_elo:.2f} Elo` |\n"
-            )
-        return f"| {label} | `{grid[idx]:.3f}d` | `{log_losses[idx]:.6f}` | `{brier_scores[idx]:.6f}` | `+{d_elo:.2f} Elo` |\n"
+            cells.append(f"`{thresholds[idx]:.1f}`")
+        if gpp_quartiles is not None:
+            q25, q50, q75 = gpp_quartiles[idx]
+            cells.append(f"`{q25:.2f} / {q50:.2f} / {q75:.2f}`")
+        cells.extend([f"`{log_losses[idx]:.6f}`", f"`{brier_scores[idx]:.6f}`", f"`+{d_elo:.2f} Elo`"])
+        return "| " + " | ".join(cells) + " |\n"
 
     for rank, idx in enumerate(ranked[:top_k], 1):
         label = f"**#{rank}**" + (" (Lila Baseline)" if idx == lila_idx else "")
@@ -89,7 +96,7 @@ def report_sweep_results(
     cohorts = build_cohorts()
 
     print(f"Swept {len(grid)} values in {elapsed:.2f}s ({elapsed / len(grid):.3f}s/run)")
-    for title, ll_col, bs_col, cnt_col, thresh_col, scope in cohorts:
+    for title, ll_col, bs_col, cnt_col, thresh_col, gpp_col, scope in cohorts:
         ll_arr = metrics[:, ll_col]
         bs_arr = metrics[:, bs_col]
         n_units = int(counts[lila_idx, cnt_col])
@@ -98,9 +105,13 @@ def report_sweep_results(
         best_idx = int(np.nanargmin(ll_arr))
         d_elo = delta_log_loss_to_elo(float(ll_arr[lila_idx] - ll_arr[best_idx]))
         thresh_note = f" [RD cut={metrics[best_idx, thresh_col]:.1f}]" if thresh_col is not None else ""
+        gpp_note = ""
+        if gpp_col is not None:
+            q25, q50, q75 = metrics[best_idx, gpp_col : gpp_col + 3]
+            gpp_note = f" [G/P={q25:.2f}/{q50:.2f}/{q75:.2f}]"
         scope_note = f" ({scope})" if scope else ""
         print(
-            f"  [{title}{scope_note}] n={n_units:,} | #1={grid[best_idx]:.3f}d{thresh_note} "
+            f"  [{title}{scope_note}] n={n_units:,} | #1={grid[best_idx]:.3f}d{thresh_note}{gpp_note} "
             f"(LL={ll_arr[best_idx]:.6f}, Brier={bs_arr[best_idx]:.6f}) | Lila (+{d_elo:.2f} Elo)"
         )
 
@@ -111,6 +122,10 @@ def report_sweep_results(
                 "est_ll,est_brier,rankable_ll,rankable_brier,"
                 "est_locked_ll,est_locked_brier,rankable_locked_ll,rankable_locked_brier,"
                 "rd_cut_est,rd_cut_rank,"
+                "est_gpp_q25,est_gpp_q50,est_gpp_q75,"
+                "rank_gpp_q25,rank_gpp_q50,rank_gpp_q75,"
+                "est_lk_gpp_q25,est_lk_gpp_q50,est_lk_gpp_q75,"
+                "rank_lk_gpp_q25,rank_lk_gpp_q50,rank_lk_gpp_q75,"
                 "eval_games,all_players,est_players,rankable_players,"
                 "est_locked_players,rankable_locked_players\n"
             )
@@ -126,9 +141,10 @@ def report_sweep_results(
                 f"### Glicko-2 Sweep: `{name}` (warmup={warmup:,}, rankable_rd<={rankable_rd:.0f}, "
                 f"white_adv=+{white_adv_elo:.2f} Elo{idle_note})\n\n"
             )
-            for idx_c, (title, ll_col, bs_col, cnt_col, thresh_col, scope) in enumerate(cohorts):
+            for idx_c, (title, ll_col, bs_col, cnt_col, thresh_col, gpp_col, scope) in enumerate(cohorts):
                 unit_label = "games" if idx_c == 0 else "players"
                 thresh_arr = metrics[:, thresh_col] if thresh_col is not None else None
+                gpp_arr = metrics[:, gpp_col : gpp_col + 3] if gpp_col is not None else None
                 write_ranked_table(
                     f,
                     title,
@@ -140,5 +156,6 @@ def report_sweep_results(
                     lila_idx,
                     top_k,
                     thresholds=thresh_arr,
+                    gpp_quartiles=gpp_arr,
                     scope=scope,
                 )

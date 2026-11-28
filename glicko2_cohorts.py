@@ -96,6 +96,16 @@ def compute_reference_rds(
 
 
 @njit(fastmath=True, cache=True)
+def _write_gpp_quartiles(out_m: np.ndarray, offset: int, gpp_vals: np.ndarray):
+    if len(gpp_vals) == 0:
+        return
+    qs = np.quantile(gpp_vals, np.array([0.25, 0.50, 0.75]))
+    out_m[offset] = float(qs[0])
+    out_m[offset + 1] = float(qs[1])
+    out_m[offset + 2] = float(qs[2])
+
+
+@njit(fastmath=True, cache=True)
 def summarize_player_cohorts(
     all_ll_sum: np.ndarray,
     all_bs_sum: np.ndarray,
@@ -108,15 +118,17 @@ def summarize_player_cohorts(
     est_target_n: int,
     rank_target_n: int,
     rankable_rd: float,
+    rating_period_days: float,
+    eval_span_days: float,
 ):
-    """Build 12 metrics and 6 counts for Game-Weighted, Established, and Rankable (Top & Locked)."""
+    """Build 24 metrics and 6 counts including Games/Period (Q25/50/75) quartiles."""
     n_players = len(all_cnt)
     n_act = 0
     for u in range(n_players):
         if all_cnt[u] > 0:
             n_act += 1
 
-    out_m = np.full(12, np.nan, dtype=np.float64)
+    out_m = np.full(24, np.nan, dtype=np.float64)
     out_c = np.zeros(6, dtype=np.int64)
     out_m[0] = (total_log_loss / eval_count) if eval_count > 0 else np.nan
     out_m[1] = (total_brier / eval_count) if eval_count > 0 else np.nan
@@ -130,7 +142,9 @@ def summarize_player_cohorts(
     p_bs = np.empty(n_act, dtype=np.float64)
     p_cand_rd = np.empty(n_act, dtype=np.float64)
     p_ref_rd = np.empty(n_act, dtype=np.float64)
+    p_gpp = np.empty(n_act, dtype=np.float64)
 
+    span = eval_span_days if eval_span_days > 1e-6 else 1.0
     j = 0
     for u in range(n_players):
         c = all_cnt[u]
@@ -139,6 +153,7 @@ def summarize_player_cohorts(
             p_bs[j] = all_bs_sum[u] / c
             p_cand_rd[j] = cand_min_rd[u]
             p_ref_rd[j] = ref_min_rd[u]
+            p_gpp[j] = (c / span) * rating_period_days
             j += 1
 
     order = np.argsort(p_cand_rd)
@@ -151,6 +166,7 @@ def summarize_player_cohorts(
         out_m[3] = float(np.mean(p_bs[est_idx]))
         out_m[10] = float(p_cand_rd[order[n_est - 1]])
         out_c[2] = n_est
+        _write_gpp_quartiles(out_m, 12, p_gpp[est_idx])
 
     if n_rank > 0:
         rank_idx = order[:n_rank]
@@ -158,27 +174,23 @@ def summarize_player_cohorts(
         out_m[5] = float(np.mean(p_bs[rank_idx]))
         out_m[11] = float(p_cand_rd[order[n_rank - 1]])
         out_c[3] = n_rank
+        _write_gpp_quartiles(out_m, 15, p_gpp[rank_idx])
 
-    lk_est_ll, lk_est_bs, lk_est_n = 0.0, 0.0, 0
-    lk_rank_ll, lk_rank_bs, lk_rank_n = 0.0, 0.0, 0
-    for idx_p in range(n_act):
-        r_rd = p_ref_rd[idx_p]
-        if r_rd < PROVISIONAL_RD:
-            lk_est_ll += p_ll[idx_p]
-            lk_est_bs += p_bs[idx_p]
-            lk_est_n += 1
-            if r_rd <= rankable_rd:
-                lk_rank_ll += p_ll[idx_p]
-                lk_rank_bs += p_bs[idx_p]
-                lk_rank_n += 1
+    lk_est_mask = p_ref_rd < PROVISIONAL_RD
+    lk_rank_mask = p_ref_rd <= rankable_rd
+    lk_est_n = int(np.sum(lk_est_mask))
+    lk_rank_n = int(np.sum(lk_rank_mask))
 
     if lk_est_n > 0:
-        out_m[6] = lk_est_ll / lk_est_n
-        out_m[7] = lk_est_bs / lk_est_n
+        out_m[6] = float(np.mean(p_ll[lk_est_mask]))
+        out_m[7] = float(np.mean(p_bs[lk_est_mask]))
         out_c[4] = lk_est_n
+        _write_gpp_quartiles(out_m, 18, p_gpp[lk_est_mask])
+
     if lk_rank_n > 0:
-        out_m[8] = lk_rank_ll / lk_rank_n
-        out_m[9] = lk_rank_bs / lk_rank_n
+        out_m[8] = float(np.mean(p_ll[lk_rank_mask]))
+        out_m[9] = float(np.mean(p_bs[lk_rank_mask]))
         out_c[5] = lk_rank_n
+        _write_gpp_quartiles(out_m, 21, p_gpp[lk_rank_mask])
 
     return out_m, out_c
