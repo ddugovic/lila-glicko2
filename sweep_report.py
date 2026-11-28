@@ -15,11 +15,11 @@ def delta_log_loss_to_elo(delta_ll: float) -> float:
 
 def build_cohorts():
     return [
-        ("Game-Weighted (All Games)", 0, 1, 0, None, None, ""),
-        ("Player-Weighted: Established", 2, 3, 2, 10, 12, "Top"),
-        ("Player-Weighted: Rankable", 4, 5, 3, 11, 15, "Top"),
-        ("Player-Weighted: Established", 6, 7, 4, None, 18, "Locked"),
-        ("Player-Weighted: Rankable", 8, 9, 5, None, 21, "Locked"),
+        ("Game-Weighted (All Games)", 0, 1, 0, None, None, None, ""),
+        ("Player-Weighted: Established", 2, 3, 2, 6, 10, 12, "Top"),
+        ("Player-Weighted: Rankable", 4, 5, 3, 7, 11, 15, "Top"),
+        ("Player-Weighted: Established", 6, 7, 4, 8, None, 18, "Locked"),
+        ("Player-Weighted: Rankable", 8, 9, 5, 9, None, 21, "Locked"),
     ]
 
 
@@ -33,6 +33,7 @@ def write_ranked_table(
     brier_scores: np.ndarray,
     lila_idx: int,
     top_k: int,
+    n_games: int | None = None,
     thresholds: np.ndarray | None = None,
     gpp_quartiles: np.ndarray | None = None,
     scope: str = "",
@@ -45,6 +46,8 @@ def write_ranked_table(
     best_ll = float(log_losses[best_idx])
 
     count_str = f"{scope} {n_units:,} {unit_label}" if scope else f"{n_units:,} {unit_label}"
+    if n_games is not None and n_games > 0:
+        count_str += f", {n_games:,} player-games"
     f.write(f"#### {title} ({count_str})\n\n")
 
     cols = ["Rank / Benchmark", "Rating Period (days)"]
@@ -96,7 +99,7 @@ def report_sweep_results(
     cohorts = build_cohorts()
 
     print(f"Swept {len(grid)} values in {elapsed:.2f}s ({elapsed / len(grid):.3f}s/run)")
-    for title, ll_col, bs_col, cnt_col, thresh_col, gpp_col, scope in cohorts:
+    for title, ll_col, bs_col, cnt_col, games_col, thresh_col, gpp_col, scope in cohorts:
         ll_arr = metrics[:, ll_col]
         bs_arr = metrics[:, bs_col]
         n_units = int(counts[lila_idx, cnt_col])
@@ -104,6 +107,7 @@ def report_sweep_results(
             continue
         best_idx = int(np.nanargmin(ll_arr))
         d_elo = delta_log_loss_to_elo(float(ll_arr[lila_idx] - ll_arr[best_idx]))
+        games_note = f" g={int(counts[lila_idx, games_col])}" if games_col is not None else ""
         thresh_note = f" [RD cut={metrics[best_idx, thresh_col]:.1f}]" if thresh_col is not None else ""
         gpp_note = ""
         if gpp_col is not None:
@@ -111,7 +115,7 @@ def report_sweep_results(
             gpp_note = f" [G/P={q25:.2f}/{q50:.2f}/{q75:.2f}]"
         scope_note = f" ({scope})" if scope else ""
         print(
-            f"  [{title}{scope_note}] n={n_units:,} | #1={grid[best_idx]:.3f}d{thresh_note}{gpp_note} "
+            f"  [{title}{scope_note}] n={n_units}{games_note} | #1={grid[best_idx]:.3f}d{thresh_note}{gpp_note} "
             f"(LL={ll_arr[best_idx]:.6f}, Brier={bs_arr[best_idx]:.6f}) | Lila (+{d_elo:.2f} Elo)"
         )
 
@@ -127,7 +131,8 @@ def report_sweep_results(
                 "est_lk_gpp_q25,est_lk_gpp_q50,est_lk_gpp_q75,"
                 "rank_lk_gpp_q25,rank_lk_gpp_q50,rank_lk_gpp_q75,"
                 "eval_games,all_players,est_players,rankable_players,"
-                "est_locked_players,rankable_locked_players\n"
+                "est_locked_players,rankable_locked_players,"
+                "est_games,rankable_games,est_locked_games,rankable_locked_games\n"
             )
             for idx, p in enumerate(grid):
                 m_str = ",".join(f"{val:.8f}" for val in metrics[idx])
@@ -141,8 +146,9 @@ def report_sweep_results(
                 f"### Glicko-2 Sweep: `{name}` (warmup={warmup:,}, rankable_rd<={rankable_rd:.0f}, "
                 f"white_adv=+{white_adv_elo:.2f} Elo{idle_note})\n\n"
             )
-            for idx_c, (title, ll_col, bs_col, cnt_col, thresh_col, gpp_col, scope) in enumerate(cohorts):
+            for idx_c, (title, ll_col, bs_col, cnt_col, games_col, thresh_col, gpp_col, scope) in enumerate(cohorts):
                 unit_label = "games" if idx_c == 0 else "players"
+                n_games = int(counts[lila_idx, games_col]) if games_col is not None else None
                 thresh_arr = metrics[:, thresh_col] if thresh_col is not None else None
                 gpp_arr = metrics[:, gpp_col : gpp_col + 3] if gpp_col is not None else None
                 write_ranked_table(
@@ -155,6 +161,7 @@ def report_sweep_results(
                     metrics[:, bs_col],
                     lila_idx,
                     top_k,
+                    n_games=n_games,
                     thresholds=thresh_arr,
                     gpp_quartiles=gpp_arr,
                     scope=scope,

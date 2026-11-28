@@ -129,7 +129,7 @@ def summarize_player_cohorts(
             n_act += 1
 
     out_m = np.full(24, np.nan, dtype=np.float64)
-    out_c = np.zeros(6, dtype=np.int64)
+    out_c = np.zeros(10, dtype=np.int64)
     out_m[0] = (total_log_loss / eval_count) if eval_count > 0 else np.nan
     out_m[1] = (total_brier / eval_count) if eval_count > 0 else np.nan
     out_c[0] = eval_count
@@ -140,6 +140,7 @@ def summarize_player_cohorts(
 
     p_ll = np.empty(n_act, dtype=np.float64)
     p_bs = np.empty(n_act, dtype=np.float64)
+    p_cnt = np.empty(n_act, dtype=np.int64)
     p_cand_rd = np.empty(n_act, dtype=np.float64)
     p_ref_rd = np.empty(n_act, dtype=np.float64)
     p_gpp = np.empty(n_act, dtype=np.float64)
@@ -151,6 +152,7 @@ def summarize_player_cohorts(
         if c > 0:
             p_ll[j] = all_ll_sum[u] / c
             p_bs[j] = all_bs_sum[u] / c
+            p_cnt[j] = c
             p_cand_rd[j] = cand_min_rd[u]
             p_ref_rd[j] = ref_min_rd[u]
             p_gpp[j] = (c / span) * rating_period_days
@@ -166,6 +168,7 @@ def summarize_player_cohorts(
         out_m[3] = float(np.mean(p_bs[est_idx]))
         out_m[10] = float(p_cand_rd[order[n_est - 1]])
         out_c[2] = n_est
+        out_c[6] = int(np.sum(p_cnt[est_idx]))
         _write_gpp_quartiles(out_m, 12, p_gpp[est_idx])
 
     if n_rank > 0:
@@ -174,6 +177,7 @@ def summarize_player_cohorts(
         out_m[5] = float(np.mean(p_bs[rank_idx]))
         out_m[11] = float(p_cand_rd[order[n_rank - 1]])
         out_c[3] = n_rank
+        out_c[7] = int(np.sum(p_cnt[rank_idx]))
         _write_gpp_quartiles(out_m, 15, p_gpp[rank_idx])
 
     lk_est_mask = p_ref_rd < PROVISIONAL_RD
@@ -185,12 +189,14 @@ def summarize_player_cohorts(
         out_m[6] = float(np.mean(p_ll[lk_est_mask]))
         out_m[7] = float(np.mean(p_bs[lk_est_mask]))
         out_c[4] = lk_est_n
+        out_c[8] = int(np.sum(p_cnt[lk_est_mask]))
         _write_gpp_quartiles(out_m, 18, p_gpp[lk_est_mask])
 
     if lk_rank_n > 0:
         out_m[8] = float(np.mean(p_ll[lk_rank_mask]))
         out_m[9] = float(np.mean(p_bs[lk_rank_mask]))
         out_c[5] = lk_rank_n
+        out_c[9] = int(np.sum(p_cnt[lk_rank_mask]))
         _write_gpp_quartiles(out_m, 21, p_gpp[lk_rank_mask])
 
     return out_m, out_c

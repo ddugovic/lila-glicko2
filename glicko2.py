@@ -69,7 +69,7 @@ def _sweep_parallel(
 ):
     n_p = len(period_days_grid)
     metrics = np.empty((n_p, 24), dtype=np.float64)
-    counts = np.empty((n_p, 6), dtype=np.int64)
+    counts = np.empty((n_p, 10), dtype=np.int64)
 
     for idx in prange(n_p):
         m_row, c_row = evaluate_rating_period(
