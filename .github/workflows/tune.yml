@@ -78,12 +78,12 @@ jobs:
           cache: "pip"
           cache-dependency-path: "requirements.txt"
       - run: pip install -r requirements.txt
-      - name: Run fast 2013-01 end-to-end smoke test
+      - name: Run 2013 end-to-end test across all categories
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          python3 tune_color_adv.py --category bullet --partitions 2013-01
-          python3 batch_sweep.py --category bullet --partitions 2013-01
+          python3 tune_color_adv.py --category all --partitions 2013
+          python3 batch_sweep.py --category all --partitions 2013
           python3 summarize_results.py
 
   tune-standard:
