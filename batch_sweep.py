@@ -108,9 +108,12 @@ def run_sweep(
     cohorts = [
         ("Game-Weighted (All Games)", 0, 1, 0),
         ("Player-Weighted (All Players)", 2, 3, 1),
-        ("Player-Weighted: Provisional (RD >= 110)", 4, 5, 2),
-        ("Player-Weighted: Established (RD < 110)", 6, 7, 3),
-        (f"Player-Weighted: Rankable (RD <= {rankable_rd:.0f})", 8, 9, 4),
+        ("Player-Weighted: Provisional (RD >= 110, Unlocked)", 4, 5, 2),
+        ("Player-Weighted: Established (RD < 110, Unlocked)", 6, 7, 3),
+        (f"Player-Weighted: Rankable (RD <= {rankable_rd:.0f}, Unlocked)", 8, 9, 4),
+        ("Player-Weighted: Provisional (RD >= 110, Locked Baseline)", 10, 11, 5),
+        ("Player-Weighted: Established (RD < 110, Locked Baseline)", 12, 13, 6),
+        (f"Player-Weighted: Rankable (RD <= {rankable_rd:.0f}, Locked Baseline)", 14, 15, 7),
     ]
 
     print(f"Swept {len(grid)} values in {elapsed:.2f}s ({elapsed / len(grid):.3f}s/run)")
@@ -132,7 +135,9 @@ def run_sweep(
             f.write(
                 "dataset,period_days,game_ll,game_brier,player_ll,player_brier,"
                 "prov_ll,prov_brier,est_ll,est_brier,rankable_ll,rankable_brier,"
-                "eval_games,all_players,prov_players,est_players,rankable_players\n"
+                "prov_locked_ll,prov_locked_brier,est_locked_ll,est_locked_brier,rankable_locked_ll,rankable_locked_brier,"
+                "eval_games,all_players,prov_players,est_players,rankable_players,"
+                "prov_locked_players,est_locked_players,rankable_locked_players\n"
             )
             for idx, p in enumerate(grid):
                 m_str = ",".join(f"{val:.8f}" for val in metrics[idx])

@@ -7,6 +7,7 @@ from glicko2_math import (
     STANDARD_RANKABLE_RD,
     TAU,
     VARIANT_RANKABLE_RD,
+    compute_reference_rds,
     evaluate_rating_period,
 )
 
@@ -50,38 +51,19 @@ def load_encoded_games(parquet_path: str):
 
 
 @njit(parallel=True, fastmath=True, cache=True)
-def sweep_rating_periods(
-    white_ids: np.ndarray,
-    black_ids: np.ndarray,
-    scores: np.ndarray,
-    days: np.ndarray,
-    n_players: int,
-    period_days_grid: np.ndarray,
-    rankable_rd: float = STANDARD_RANKABLE_RD,
-    white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
-    tau: float = TAU,
-    warmup_games: int = 500_000,
-    min_idle_days: float = 0.0,
+def _sweep_parallel(
+    white_ids: np.ndarray, black_ids: np.ndarray, scores: np.ndarray, days: np.ndarray,
+    ref_rd_w: np.ndarray, ref_rd_b: np.ndarray, n_players: int,
+    period_days_grid: np.ndarray, rankable_rd: float, white_adv_elo: float,
+    tau: float, warmup_games: int, min_idle_days: float,
 ):
-    """Evaluate all candidate rating_period_days values in parallel across CPU threads."""
     n_p = len(period_days_grid)
-    metrics = np.empty((n_p, 10), dtype=np.float64)
-    counts = np.empty((n_p, 5), dtype=np.int64)
+    metrics = np.empty((n_p, 16), dtype=np.float64)
+    counts = np.empty((n_p, 8), dtype=np.int64)
 
     for idx in prange(n_p):
-        (
-            metrics[idx, 0], metrics[idx, 1],
-            metrics[idx, 2], metrics[idx, 3],
-            metrics[idx, 4], metrics[idx, 5],
-            metrics[idx, 6], metrics[idx, 7],
-            metrics[idx, 8], metrics[idx, 9],
-            counts[idx, 0], counts[idx, 1], counts[idx, 2], counts[idx, 3], counts[idx, 4],
-        ) = evaluate_rating_period(
-            white_ids,
-            black_ids,
-            scores,
-            days,
-            n_players,
+        m_row, c_row = evaluate_rating_period(
+            white_ids, black_ids, scores, days, ref_rd_w, ref_rd_b, n_players,
             rating_period_days=period_days_grid[idx],
             rankable_rd=rankable_rd,
             white_adv_elo=white_adv_elo,
@@ -89,10 +71,28 @@ def sweep_rating_periods(
             warmup_games=warmup_games,
             min_idle_days=min_idle_days,
         )
+        metrics[idx] = m_row
+        counts[idx] = c_row
 
     return metrics, counts
 
 
+def sweep_rating_periods(
+    white_ids: np.ndarray, black_ids: np.ndarray, scores: np.ndarray, days: np.ndarray,
+    n_players: int, period_days_grid: np.ndarray,
+    rankable_rd: float = STANDARD_RANKABLE_RD,
+    white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
+    tau: float = TAU, warmup_games: int = 500_000, min_idle_days: float = 0.0,
+):
+    """Computes baseline reference RDs once, then sweeps all rating periods in parallel."""
+    ref_rd_w, ref_rd_b = compute_reference_rds(
+        white_ids, black_ids, scores, days, n_players, white_adv_elo=white_adv_elo, tau=tau
+    )
+    return _sweep_parallel(
+        white_ids, black_ids, scores, days, ref_rd_w, ref_rd_b, n_players,
+        period_days_grid, rankable_rd, white_adv_elo, tau, warmup_games, min_idle_days,
+    )
+
+
 def active_numba_threads() -> int:
     return get_num_threads()
-

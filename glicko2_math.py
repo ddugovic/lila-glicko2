@@ -1,135 +1,72 @@
 import math
 import numpy as np
 from numba import njit
-
-# Exact constants from lila (lichess)
-GLICKO2_SCALE = 173.7178               # 400 / ln(10)
-INIT_RATING = 1500.0
-MIN_RATING = 400.0
-MAX_RATING = 4000.0
-
-MIN_RD = 45.0
-MAX_RD = 500.0                         # lila: maxDeviation = 500d
-PROVISIONAL_RD = 110.0                 # lila: ? mark threshold
-STANDARD_RANKABLE_RD = 75.0            # lila: standardRankableDeviation = 75
-VARIANT_RANKABLE_RD = 65.0             # lila: variantRankableDeviation = 65
-STANDARD_COLOR_ADV_ELO = 11.782457     # lila: ColorAdvantage.standard = 11.782457d
-INIT_VOL = 0.09                        # lila: defaultVolatility = 0.09d
-MAX_VOL = 0.1                          # lila: maxVolatility = 0.1d
-TAU = 0.75                             # lila system constant
-EPSILON = 1e-6
-LILA_RATING_PERIOD_DAYS = 1.0 / 0.21436  # ~4.66505 days
-
-
-@njit(fastmath=True, cache=True)
-def g_func(phi: float) -> float:
-    return 1.0 / math.sqrt(1.0 + 3.0 * phi * phi / (math.pi * math.pi))
+from glicko2_calc import (
+    GLICKO2_SCALE,
+    INIT_RATING,
+    INIT_VOL,
+    LILA_RATING_PERIOD_DAYS,
+    MAX_RATING,
+    MAX_RD,
+    MIN_RATING,
+    MIN_RD,
+    PROVISIONAL_RD,
+    STANDARD_COLOR_ADV_ELO,
+    STANDARD_RANKABLE_RD,
+    TAU,
+    VARIANT_RANKABLE_RD,
+    age_phi,
+    expected_score,
+    update_player_m1,
+)
 
 
 @njit(fastmath=True, cache=True)
-def expected_score(mu: float, mu_opp: float, phi_opp: float) -> float:
-    return 1.0 / (1.0 + math.exp(-g_func(phi_opp) * (mu - mu_opp)))
-
-
-@njit(fastmath=True, cache=True)
-def clamp_mu(mu: float, min_mu: float, max_mu: float) -> float:
-    if mu < min_mu:
-        return min_mu
-    if mu > max_mu:
-        return max_mu
-    return mu
-
-
-@njit(fastmath=True, cache=True)
-def age_phi(
-    phi: float,
-    sigma: float,
-    dt_days: float,
-    rating_period_days: float,
-    max_phi: float,
-) -> float:
-    """Apply pre-game RD (phi) growth over elapsed fractional rating periods."""
-    if dt_days <= 0.0:
-        return phi
-    periods = dt_days / rating_period_days
-    phi_star = math.sqrt(phi * phi + periods * sigma * sigma)
-    return max_phi if phi_star > max_phi else phi_star
-
-
-@njit(fastmath=True, cache=True)
-def update_volatility(phi: float, sigma: float, v: float, delta: float, tau: float) -> float:
-    """Glickman's Illinois algorithm with lila's maxVolatility = 0.1 cap."""
-    a = math.log(sigma * sigma)
-    tau2 = tau * tau
-    phi2 = phi * phi
-    delta2 = delta * delta
-
-    def f(x: float) -> float:
-        ex = math.exp(x)
-        num = ex * (delta2 - phi2 - v - ex)
-        den = 2.0 * (phi2 + v + ex) ** 2
-        return (num / den) - ((x - a) / tau2)
-
-    A = a
-    if delta2 > phi2 + v:
-        B = math.log(delta2 - phi2 - v)
-    else:
-        k = 1
-        while f(a - k * tau) < 0.0:
-            k += 1
-        B = a - k * tau
-
-    fA = f(A)
-    fB = f(B)
-
-    while abs(B - A) > EPSILON:
-        C = A + (A - B) * fA / (fB - fA)
-        fC = f(C)
-        if fC * fB <= 0.0:
-            A = B
-            fA = fB
-        else:
-            fA *= 0.5
-        B = C
-        fB = fC
-
-    new_sigma = math.exp(A * 0.5)
-    return MAX_VOL if new_sigma > MAX_VOL else new_sigma
-
-
-@njit(fastmath=True, cache=True)
-def update_player_m1(
-    mu: float,
-    phi_star: float,
-    sigma: float,
-    mu_opp: float,
-    phi_star_opp: float,
-    score: float,
-    tau: float,
-    min_phi: float,
-    min_mu: float,
-    max_mu: float,
+def compute_reference_rds(
+    white_ids: np.ndarray, black_ids: np.ndarray, scores: np.ndarray, days: np.ndarray,
+    n_players: int, white_adv_elo: float = STANDARD_COLOR_ADV_ELO, tau: float = TAU,
 ):
-    """Single-game (m = 1) Glicko-2 update returning (new_mu, new_phi, new_sigma)."""
-    g_opp = g_func(phi_star_opp)
-    e = expected_score(mu, mu_opp, phi_star_opp)
-    v = 1.0 / (g_opp * g_opp * e * (1.0 - e))
-    delta = v * g_opp * (score - e)
+    """Run Lila baseline (4.665d) once to record fixed pre-game RDs (float32) for locked cohorts."""
+    n_games = len(scores)
+    ref_rd_w = np.empty(n_games, dtype=np.float32)
+    ref_rd_b = np.empty(n_games, dtype=np.float32)
 
-    new_sigma = update_volatility(phi_star, sigma, v, delta, tau)
-    new_phi = 1.0 / math.sqrt((1.0 / (phi_star * phi_star)) + (1.0 / v))
-    if new_phi < min_phi:
-        new_phi = min_phi
+    min_mu = (MIN_RATING - INIT_RATING) / GLICKO2_SCALE
+    max_mu = (MAX_RATING - INIT_RATING) / GLICKO2_SCALE
+    max_phi = MAX_RD / GLICKO2_SCALE
+    min_phi = MIN_RD / GLICKO2_SCALE
+    white_adv_mu = white_adv_elo / GLICKO2_SCALE
 
-    new_mu = clamp_mu(mu + new_phi * new_phi * g_opp * (score - e), min_mu, max_mu)
-    return new_mu, new_phi, new_sigma
+    mus = np.zeros(n_players, dtype=np.float64)
+    phis = np.full(n_players, max_phi, dtype=np.float64)
+    sigmas = np.full(n_players, INIT_VOL, dtype=np.float64)
+    last_played = np.full(n_players, -1.0, dtype=np.float64)
+
+    for i in range(n_games):
+        w, b, s_w, t = white_ids[i], black_ids[i], scores[i], days[i]
+        dt_w = (t - last_played[w]) if last_played[w] >= 0.0 else -1.0
+        dt_b = (t - last_played[b]) if last_played[b] >= 0.0 else -1.0
+
+        phi_star_w = age_phi(phis[w], sigmas[w], dt_w, LILA_RATING_PERIOD_DAYS, max_phi) if dt_w >= 0.0 else max_phi
+        phi_star_b = age_phi(phis[b], sigmas[b], dt_b, LILA_RATING_PERIOD_DAYS, max_phi) if dt_b >= 0.0 else max_phi
+
+        ref_rd_w[i] = np.float32(phi_star_w * GLICKO2_SCALE)
+        ref_rd_b[i] = np.float32(phi_star_b * GLICKO2_SCALE)
+
+        mus[w], phis[w], sigmas[w] = update_player_m1(
+            mus[w], phi_star_w, sigmas[w], mus[b] - white_adv_mu, phi_star_b, s_w, tau, min_phi, min_mu, max_mu
+        )
+        mus[b], phis[b], sigmas[b] = update_player_m1(
+            mus[b], phi_star_b, sigmas[b], mus[w] + white_adv_mu, phi_star_w, 1.0 - s_w, tau, min_phi, min_mu, max_mu
+        )
+        last_played[w], last_played[b] = t, t
+
+    return ref_rd_w, ref_rd_b
 
 
 @njit(fastmath=True, cache=True)
 def _macro_avg(ll_sum: np.ndarray, bs_sum: np.ndarray, counts: np.ndarray):
-    total_ll = 0.0
-    total_bs = 0.0
-    n_active = 0
+    total_ll, total_bs, n_active = 0.0, 0.0, 0
     for u in range(len(counts)):
         c = counts[u]
         if c > 0:
@@ -143,23 +80,14 @@ def _macro_avg(ll_sum: np.ndarray, bs_sum: np.ndarray, counts: np.ndarray):
 
 @njit(fastmath=True, cache=True)
 def evaluate_rating_period(
-    white_ids: np.ndarray,
-    black_ids: np.ndarray,
-    scores: np.ndarray,
-    days: np.ndarray,
-    n_players: int,
+    white_ids: np.ndarray, black_ids: np.ndarray, scores: np.ndarray, days: np.ndarray,
+    ref_rd_w: np.ndarray, ref_rd_b: np.ndarray, n_players: int,
     rating_period_days: float = LILA_RATING_PERIOD_DAYS,
     rankable_rd: float = STANDARD_RANKABLE_RD,
     white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
-    tau: float = TAU,
-    warmup_games: int = 500_000,
-    min_idle_days: float = 0.0,
+    tau: float = TAU, warmup_games: int = 500_000, min_idle_days: float = 0.0,
 ):
-    """
-    Simulate full game stream with White color advantage and return:
-    (game_ll, game_bs, all_p_ll, all_p_bs, prov_ll, prov_bs, est_ll, est_bs, rank_ll, rank_bs,
-     eval_games, all_p_cnt, prov_cnt, est_cnt, rank_cnt).
-    """
+    """Return 16 metrics (8 LL/Brier pairs) and 8 counts covering game, all-player, unlocked, and locked cohorts."""
     min_mu = (MIN_RATING - INIT_RATING) / GLICKO2_SCALE
     max_mu = (MAX_RATING - INIT_RATING) / GLICKO2_SCALE
     max_phi = MAX_RD / GLICKO2_SCALE
@@ -171,117 +99,92 @@ def evaluate_rating_period(
     sigmas = np.full(n_players, INIT_VOL, dtype=np.float64)
     last_played = np.full(n_players, -1.0, dtype=np.float64)
 
-    all_ll_sum = np.zeros(n_players, dtype=np.float64)
-    all_bs_sum = np.zeros(n_players, dtype=np.float64)
-    all_cnt = np.zeros(n_players, dtype=np.int32)
+    # 0: all players, 1..3: unlocked (prov, est, rank), 4..6: locked (prov, est, rank)
+    ll_sums = np.zeros((7, n_players), dtype=np.float64)
+    bs_sums = np.zeros((7, n_players), dtype=np.float64)
+    cnts = np.zeros((7, n_players), dtype=np.int32)
 
-    prov_ll_sum = np.zeros(n_players, dtype=np.float64)
-    prov_bs_sum = np.zeros(n_players, dtype=np.float64)
-    prov_cnt = np.zeros(n_players, dtype=np.int32)
-
-    est_ll_sum = np.zeros(n_players, dtype=np.float64)
-    est_bs_sum = np.zeros(n_players, dtype=np.float64)
-    est_cnt = np.zeros(n_players, dtype=np.int32)
-
-    rank_ll_sum = np.zeros(n_players, dtype=np.float64)
-    rank_bs_sum = np.zeros(n_players, dtype=np.float64)
-    rank_cnt = np.zeros(n_players, dtype=np.int32)
-
-    total_log_loss = 0.0
-    total_brier = 0.0
-    eval_count = 0
+    total_log_loss, total_brier, eval_count = 0.0, 0.0, 0
 
     for i in range(len(scores)):
-        w = white_ids[i]
-        b = black_ids[i]
-        s_w = scores[i]
-        t = days[i]
-
-        mu_w, sigma_w = mus[w], sigmas[w]
-        mu_b, sigma_b = mus[b], sigmas[b]
-
+        w, b, s_w, t = white_ids[i], black_ids[i], scores[i], days[i]
         dt_w = (t - last_played[w]) if last_played[w] >= 0.0 else -1.0
         dt_b = (t - last_played[b]) if last_played[b] >= 0.0 else -1.0
 
-        phi_star_w = age_phi(phis[w], sigma_w, dt_w, rating_period_days, max_phi) if dt_w >= 0.0 else max_phi
-        phi_star_b = age_phi(phis[b], sigma_b, dt_b, rating_period_days, max_phi) if dt_b >= 0.0 else max_phi
+        phi_star_w = age_phi(phis[w], sigmas[w], dt_w, rating_period_days, max_phi) if dt_w >= 0.0 else max_phi
+        phi_star_b = age_phi(phis[b], sigmas[b], dt_b, rating_period_days, max_phi) if dt_b >= 0.0 else max_phi
 
         phi_comb = math.sqrt(phi_star_w * phi_star_w + phi_star_b * phi_star_b)
-        e_pred = expected_score(mu_w + white_adv_mu, mu_b, phi_comb)
+        e_pred = expected_score(mus[w] + white_adv_mu, mus[b], phi_comb)
 
         if i >= warmup_games:
             qualifies = True if min_idle_days <= 0.0 else ((dt_w >= min_idle_days) or (dt_b >= min_idle_days))
             if qualifies:
                 p = min(max(e_pred, 1e-12), 1.0 - 1e-12)
-                game_ll = -(s_w * math.log(p) + (1.0 - s_w) * math.log(1.0 - p))
+                g_ll = -(s_w * math.log(p) + (1.0 - s_w) * math.log(1.0 - p))
                 err = s_w - e_pred
-                game_bs = err * err
+                g_bs = err * err
 
-                total_log_loss += game_ll
-                total_brier += game_bs
+                total_log_loss += g_ll
+                total_brier += g_bs
                 eval_count += 1
 
-                # All players
-                all_ll_sum[w] += game_ll
-                all_bs_sum[w] += game_bs
-                all_cnt[w] += 1
-                all_ll_sum[b] += game_ll
-                all_bs_sum[b] += game_bs
-                all_cnt[b] += 1
+                for side in range(2):
+                    u = w if side == 0 else b
+                    rd_dyn = (phi_star_w if side == 0 else phi_star_b) * GLICKO2_SCALE
+                    rd_fix = float(ref_rd_w[i] if side == 0 else ref_rd_b[i])
 
-                # White RD cohorts
-                rd_w = phi_star_w * GLICKO2_SCALE
-                if rd_w >= PROVISIONAL_RD:
-                    prov_ll_sum[w] += game_ll
-                    prov_bs_sum[w] += game_bs
-                    prov_cnt[w] += 1
-                else:
-                    est_ll_sum[w] += game_ll
-                    est_bs_sum[w] += game_bs
-                    est_cnt[w] += 1
-                    if rd_w <= rankable_rd:
-                        rank_ll_sum[w] += game_ll
-                        rank_bs_sum[w] += game_bs
-                        rank_cnt[w] += 1
+                    ll_sums[0, u] += g_ll
+                    bs_sums[0, u] += g_bs
+                    cnts[0, u] += 1
 
-                # Black RD cohorts
-                rd_b = phi_star_b * GLICKO2_SCALE
-                if rd_b >= PROVISIONAL_RD:
-                    prov_ll_sum[b] += game_ll
-                    prov_bs_sum[b] += game_bs
-                    prov_cnt[b] += 1
-                else:
-                    est_ll_sum[b] += game_ll
-                    est_bs_sum[b] += game_bs
-                    est_cnt[b] += 1
-                    if rd_b <= rankable_rd:
-                        rank_ll_sum[b] += game_ll
-                        rank_bs_sum[b] += game_bs
-                        rank_cnt[b] += 1
+                    # Unlocked cohorts (slots 1..3)
+                    if rd_dyn >= PROVISIONAL_RD:
+                        ll_sums[1, u] += g_ll
+                        bs_sums[1, u] += g_bs
+                        cnts[1, u] += 1
+                    else:
+                        ll_sums[2, u] += g_ll
+                        bs_sums[2, u] += g_bs
+                        cnts[2, u] += 1
+                        if rd_dyn <= rankable_rd:
+                            ll_sums[3, u] += g_ll
+                            bs_sums[3, u] += g_bs
+                            cnts[3, u] += 1
 
-        new_mu_w, new_phi_w, new_sigma_w = update_player_m1(
-            mu_w, phi_star_w, sigma_w, mu_b - white_adv_mu, phi_star_b, s_w, tau, min_phi, min_mu, max_mu
+                    # Locked baseline cohorts (slots 4..6)
+                    if rd_fix >= PROVISIONAL_RD:
+                        ll_sums[4, u] += g_ll
+                        bs_sums[4, u] += g_bs
+                        cnts[4, u] += 1
+                    else:
+                        ll_sums[5, u] += g_ll
+                        bs_sums[5, u] += g_bs
+                        cnts[5, u] += 1
+                        if rd_fix <= rankable_rd:
+                            ll_sums[6, u] += g_ll
+                            bs_sums[6, u] += g_bs
+                            cnts[6, u] += 1
+
+        mus[w], phis[w], sigmas[w] = update_player_m1(
+            mus[w], phi_star_w, sigmas[w], mus[b] - white_adv_mu, phi_star_b, s_w, tau, min_phi, min_mu, max_mu
         )
-        new_mu_b, new_phi_b, new_sigma_b = update_player_m1(
-            mu_b, phi_star_b, sigma_b, mu_w + white_adv_mu, phi_star_w, 1.0 - s_w, tau, min_phi, min_mu, max_mu
+        mus[b], phis[b], sigmas[b] = update_player_m1(
+            mus[b], phi_star_b, sigmas[b], mus[w] + white_adv_mu, phi_star_w, 1.0 - s_w, tau, min_phi, min_mu, max_mu
         )
+        last_played[w], last_played[b] = t, t
 
-        mus[w], phis[w], sigmas[w], last_played[w] = new_mu_w, new_phi_w, new_sigma_w, t
-        mus[b], phis[b], sigmas[b], last_played[b] = new_mu_b, new_phi_b, new_sigma_b, t
+    out_m = np.empty(16, dtype=np.float64)
+    out_c = np.empty(8, dtype=np.int64)
+    out_m[0] = (total_log_loss / eval_count) if eval_count > 0 else np.nan
+    out_m[1] = (total_brier / eval_count) if eval_count > 0 else np.nan
+    out_c[0] = eval_count
 
-    game_ll_avg = (total_log_loss / eval_count) if eval_count > 0 else np.nan
-    game_bs_avg = (total_brier / eval_count) if eval_count > 0 else np.nan
-    all_p_ll, all_p_bs, all_p_n = _macro_avg(all_ll_sum, all_bs_sum, all_cnt)
-    prov_ll, prov_bs, prov_n = _macro_avg(prov_ll_sum, prov_bs_sum, prov_cnt)
-    est_ll, est_bs, est_n = _macro_avg(est_ll_sum, est_bs_sum, est_cnt)
-    rank_ll, rank_bs, rank_n = _macro_avg(rank_ll_sum, rank_bs_sum, rank_cnt)
+    for k in range(7):
+        m_ll, m_bs, n_act = _macro_avg(ll_sums[k], bs_sums[k], cnts[k])
+        out_m[2 + 2 * k] = m_ll
+        out_m[3 + 2 * k] = m_bs
+        out_c[1 + k] = n_act
 
-    return (
-        game_ll_avg, game_bs_avg,
-        all_p_ll, all_p_bs,
-        prov_ll, prov_bs,
-        est_ll, est_bs,
-        rank_ll, rank_bs,
-        eval_count, all_p_n, prov_n, est_n, rank_n,
-    )
+    return out_m, out_c
 
