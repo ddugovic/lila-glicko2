@@ -1,6 +1,8 @@
 import math
+
 import numpy as np
-from glicko2 import LILA_RATING_PERIOD_DAYS
+
+from glicko2_calc import LILA_RATING_PERIOD_DAYS
 
 
 def delta_log_loss_to_elo(delta_ll: float) -> float:
@@ -60,10 +62,7 @@ def write_ranked_table(
                 f"| {label} | `{grid[idx]:.3f}d` | `{thresholds[idx]:.1f}` | "
                 f"`{log_losses[idx]:.6f}` | `{brier_scores[idx]:.6f}` | `+{d_elo:.2f} Elo` |\n"
             )
-        return (
-            f"| {label} | `{grid[idx]:.3f}d` | `{log_losses[idx]:.6f}` | "
-            f"`{brier_scores[idx]:.6f}` | `+{d_elo:.2f} Elo` |\n"
-        )
+        return f"| {label} | `{grid[idx]:.3f}d` | `{log_losses[idx]:.6f}` | `{brier_scores[idx]:.6f}` | `+{d_elo:.2f} Elo` |\n"
 
     for rank, idx in enumerate(ranked[:top_k], 1):
         label = f"**#{rank}**" + (" (Lila Baseline)" if idx == lila_idx else "")
@@ -146,4 +145,3 @@ def report_sweep_results(
                     thresholds=thresh_arr,
                     scope=scope,
                 )
-

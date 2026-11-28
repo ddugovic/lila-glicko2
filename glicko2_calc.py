@@ -1,21 +1,22 @@
 import math
+
 from numba import njit
 
 # Exact constants from lila (lichess)
-GLICKO2_SCALE = 173.7178               # 400 / ln(10)
+GLICKO2_SCALE = 173.7178  # 400 / ln(10)
 INIT_RATING = 1500.0
 MIN_RATING = 400.0
 MAX_RATING = 4000.0
 
 MIN_RD = 45.0
-MAX_RD = 500.0                         # lila: maxDeviation = 500d
-PROVISIONAL_RD = 110.0                 # lila: ? mark threshold
-STANDARD_RANKABLE_RD = 75.0            # lila: standardRankableDeviation = 75
-VARIANT_RANKABLE_RD = 65.0             # lila: variantRankableDeviation = 65
-STANDARD_COLOR_ADV_ELO = 11.782457     # lila: ColorAdvantage.standard = 11.782457d
-INIT_VOL = 0.09                        # lila: defaultVolatility = 0.09d
-MAX_VOL = 0.1                          # lila: maxVolatility = 0.1d
-TAU = 0.75                             # lila system constant
+MAX_RD = 500.0  # lila: maxDeviation = 500d
+PROVISIONAL_RD = 110.0  # lila: ? mark threshold
+STANDARD_RANKABLE_RD = 75.0  # lila: standardRankableDeviation = 75
+VARIANT_RANKABLE_RD = 65.0  # lila: variantRankableDeviation = 65
+STANDARD_COLOR_ADV_ELO = 11.782457  # lila: ColorAdvantage.standard = 11.782457d
+INIT_VOL = 0.09  # lila: defaultVolatility = 0.09d
+MAX_VOL = 0.1  # lila: maxVolatility = 0.1d
+TAU = 0.75  # lila system constant
 EPSILON = 1e-6
 LILA_RATING_PERIOD_DAYS = 1.0 / 0.21436  # ~4.66505 days
 
@@ -90,8 +91,16 @@ def update_volatility(phi: float, sigma: float, v: float, delta: float, tau: flo
 
 @njit(fastmath=True, cache=True)
 def update_player_m1(
-    mu: float, phi_star: float, sigma: float, mu_opp: float, phi_star_opp: float,
-    score: float, tau: float, min_phi: float, min_mu: float, max_mu: float,
+    mu: float,
+    phi_star: float,
+    sigma: float,
+    mu_opp: float,
+    phi_star_opp: float,
+    score: float,
+    tau: float,
+    min_phi: float,
+    min_mu: float,
+    max_mu: float,
 ):
     g_opp = g_func(phi_star_opp)
     e = expected_score(mu, mu_opp, phi_star_opp)
@@ -105,4 +114,3 @@ def update_player_m1(
 
     new_mu = clamp_mu(mu + new_phi * new_phi * g_opp * (score - e), min_mu, max_mu)
     return new_mu, new_phi, new_sigma
-

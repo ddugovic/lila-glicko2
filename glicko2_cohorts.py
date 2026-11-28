@@ -1,5 +1,6 @@
 import numpy as np
 from numba import njit
+
 from glicko2_calc import (
     GLICKO2_SCALE,
     INIT_RATING,
@@ -20,10 +21,16 @@ from glicko2_calc import (
 
 @njit(fastmath=True, cache=True)
 def compute_reference_rds(
-    white_ids: np.ndarray, black_ids: np.ndarray, scores: np.ndarray, days: np.ndarray,
-    n_players: int, rankable_rd: float = STANDARD_RANKABLE_RD,
-    white_adv_elo: float = STANDARD_COLOR_ADV_ELO, tau: float = TAU,
-    warmup_games: int = 500_000, min_idle_days: float = 0.0,
+    white_ids: np.ndarray,
+    black_ids: np.ndarray,
+    scores: np.ndarray,
+    days: np.ndarray,
+    n_players: int,
+    rankable_rd: float = STANDARD_RANKABLE_RD,
+    white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
+    tau: float = TAU,
+    warmup_games: int = 500_000,
+    min_idle_days: float = 0.0,
 ):
     """Run Lila baseline (4.665d) once to record fixed pre-game RDs and exact player cohort sizes."""
     n_games = len(scores)
@@ -93,10 +100,17 @@ def compute_reference_rds(
 
 @njit(fastmath=True, cache=True)
 def summarize_player_cohorts(
-    all_ll_sum: np.ndarray, all_bs_sum: np.ndarray, all_cnt: np.ndarray,
-    cand_min_rd: np.ndarray, ref_min_rd: np.ndarray,
-    total_log_loss: float, total_brier: float, eval_count: int,
-    prov_target_n: int, est_target_n: int, rank_target_n: int,
+    all_ll_sum: np.ndarray,
+    all_bs_sum: np.ndarray,
+    all_cnt: np.ndarray,
+    cand_min_rd: np.ndarray,
+    ref_min_rd: np.ndarray,
+    total_log_loss: float,
+    total_brier: float,
+    eval_count: int,
+    prov_target_n: int,
+    est_target_n: int,
+    rank_target_n: int,
     rankable_rd: float,
 ):
     """Build 18 metrics and 8 counts from per-player accumulators."""
@@ -191,4 +205,3 @@ def summarize_player_cohorts(
         out_c[7] = lk_rank_n
 
     return out_m, out_c
-

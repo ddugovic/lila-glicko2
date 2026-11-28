@@ -1,17 +1,18 @@
 import argparse
 import os
 import time
+
 import numpy as np
+
 from benchmark import estimate_sweep_seconds, format_duration
 from dataset_loader import list_available_partitions, prepare_datasets
 from glicko2 import (
-    LILA_RATING_PERIOD_DAYS,
     STANDARD_RANKABLE_RD,
-    VARIANT_RANKABLE_RD,
     active_numba_threads,
     load_encoded_games,
     sweep_rating_periods,
 )
+from glicko2_calc import LILA_RATING_PERIOD_DAYS, VARIANT_RANKABLE_RD
 from partitions import (
     CATEGORY_REPOS,
     COLOR_ADV_ELO,
@@ -40,11 +41,7 @@ def run_sweep(
     white_ids, black_ids, scores, days, n_players = load_encoded_games(path)
     print(f"Loaded {len(scores):,} games ({n_players:,} players) in {time.perf_counter() - t0:.2f}s")
 
-    warmup = (
-        int(np.searchsorted(days, days[0] + warmup_days))
-        if warmup_days is not None
-        else min(500_000, len(scores) // 10)
-    )
+    warmup = int(np.searchsorted(days, days[0] + warmup_days)) if warmup_days is not None else min(500_000, len(scores) // 10)
     est_sec = estimate_sweep_seconds(white_ids, black_ids, scores, days, n_players, len(grid), rankable_rd)
     print(
         f"Warmup: {warmup:,} games | Min idle: {min_idle_days:.2f}d | Rankable RD <= {rankable_rd:.0f} "
@@ -152,4 +149,3 @@ if __name__ == "__main__":
                 )
     except KeyboardInterrupt:
         print("\nInterrupted; keeping results from completed sweeps.")
-

@@ -1,9 +1,11 @@
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 import os
 import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+
 import duckdb
 from huggingface_hub import HfApi, hf_hub_download
+
 from partitions import CATEGORY_REPOS, make_label, resolve_partition_prefixes, speed_where_clause
 
 
@@ -121,9 +123,7 @@ def prepare_datasets(
                 with ThreadPoolExecutor(max_workers=len(batch)) as pool:
                     local_paths = list(
                         pool.map(
-                            lambda s: hf_hub_download(
-                                repo_id=repo_id, repo_type="dataset", filename=s.path, token=hf_token
-                            ),
+                            lambda s: hf_hub_download(repo_id=repo_id, repo_type="dataset", filename=s.path, token=hf_token),
                             batch,
                         )
                     )
@@ -171,4 +171,3 @@ def prepare_datasets(
         print(f"Finished {repo_id} extraction in {time.perf_counter() - t0:.2f}s")
 
     return ready
-

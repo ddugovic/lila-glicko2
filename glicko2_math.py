@@ -1,6 +1,8 @@
 import math
+
 import numpy as np
 from numba import njit
+
 from glicko2_calc import (
     GLICKO2_SCALE,
     INIT_RATING,
@@ -17,18 +19,27 @@ from glicko2_calc import (
     expected_score,
     update_player_m1,
 )
-from glicko2_cohorts import compute_reference_rds, summarize_player_cohorts
+from glicko2_cohorts import summarize_player_cohorts
 
 
 @njit(fastmath=True, cache=True)
 def evaluate_rating_period(
-    white_ids: np.ndarray, black_ids: np.ndarray, scores: np.ndarray, days: np.ndarray,
-    ref_rd_w: np.ndarray, ref_rd_b: np.ndarray, n_players: int,
-    prov_target_n: int, est_target_n: int, rank_target_n: int,
+    white_ids: np.ndarray,
+    black_ids: np.ndarray,
+    scores: np.ndarray,
+    days: np.ndarray,
+    ref_rd_w: np.ndarray,
+    ref_rd_b: np.ndarray,
+    n_players: int,
+    prov_target_n: int,
+    est_target_n: int,
+    rank_target_n: int,
     rating_period_days: float = LILA_RATING_PERIOD_DAYS,
     rankable_rd: float = STANDARD_RANKABLE_RD,
     white_adv_elo: float = STANDARD_COLOR_ADV_ELO,
-    tau: float = TAU, warmup_games: int = 500_000, min_idle_days: float = 0.0,
+    tau: float = TAU,
+    warmup_games: int = 500_000,
+    min_idle_days: float = 0.0,
 ):
     """Simulate full game stream for a candidate rating_period_days."""
     min_mu = (MIN_RATING - INIT_RATING) / GLICKO2_SCALE
@@ -103,8 +114,16 @@ def evaluate_rating_period(
         last_played[w], last_played[b] = t, t
 
     return summarize_player_cohorts(
-        all_ll_sum, all_bs_sum, all_cnt, cand_min_rd, ref_min_rd,
-        total_log_loss, total_brier, eval_count,
-        prov_target_n, est_target_n, rank_target_n, rankable_rd,
+        all_ll_sum,
+        all_bs_sum,
+        all_cnt,
+        cand_min_rd,
+        ref_min_rd,
+        total_log_loss,
+        total_brier,
+        eval_count,
+        prov_target_n,
+        est_target_n,
+        rank_target_n,
+        rankable_rd,
     )
-

@@ -1,6 +1,8 @@
 import math
 import time
+
 import numpy as np
+
 from glicko2 import active_numba_threads
 from glicko2_math import evaluate_rating_period
 
@@ -66,4 +68,3 @@ def format_duration(seconds: float) -> str:
     if seconds < 5400.0:
         return f"{seconds / 60.0:.1f} min"
     return f"{seconds / 3600.0:.2f} hr"
-

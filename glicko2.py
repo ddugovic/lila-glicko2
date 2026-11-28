@@ -1,14 +1,14 @@
 import duckdb
 import numpy as np
 from numba import get_num_threads, njit, prange
+
 from glicko2_calc import (
-    LILA_RATING_PERIOD_DAYS,
     STANDARD_COLOR_ADV_ELO,
     STANDARD_RANKABLE_RD,
     TAU,
-    VARIANT_RANKABLE_RD,
 )
-from glicko2_math import compute_reference_rds, evaluate_rating_period
+from glicko2_cohorts import compute_reference_rds
+from glicko2_math import evaluate_rating_period
 
 
 def load_encoded_games(parquet_path: str):
@@ -145,4 +145,3 @@ def sweep_rating_periods(
 
 def active_numba_threads() -> int:
     return get_num_threads()
-

@@ -26,8 +26,7 @@ def speed_where_clause(speed: str) -> str:
         return "AND (Event LIKE '%Correspondence%' OR TimeControl = '-')"
 
     est_sec = (
-        "(TRY_CAST(split_part(TimeControl, '+', 1) AS DOUBLE) "
-        "+ 40.0 * COALESCE(TRY_CAST(split_part(TimeControl, '+', 2) AS DOUBLE), 0.0))"
+        "(TRY_CAST(split_part(TimeControl, '+', 1) AS DOUBLE) + 40.0 * COALESCE(TRY_CAST(split_part(TimeControl, '+', 2) AS DOUBLE), 0.0))"
     )
     bounds = {
         "bullet": f"{est_sec} < 180",
@@ -82,7 +81,7 @@ def resolve_targets(raw_categories: list[str], raw_speeds: list[str] | None) -> 
     targets: list[tuple[str, str]] = list(implicit_targets)
     for cat in cats:
         if cat == "standard":
-            for s in ([s for s in speeds if s != "realtime"] or STANDARD_SPEEDS):
+            for s in [s for s in speeds if s != "realtime"] or STANDARD_SPEEDS:
                 if (cat, s) not in targets:
                     targets.append((cat, s))
         else:
@@ -144,4 +143,3 @@ def make_label(category: str, speed: str, part_tag: str, date_tag: str) -> str:
     cat_slug = category.replace("-", "_")
     base = speed if category == "standard" else (cat_slug if speed == "realtime" else f"{cat_slug}_{speed}")
     return f"{base}_{part_tag}{date_tag}"
-

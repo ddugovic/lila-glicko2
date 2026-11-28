@@ -1,8 +1,10 @@
 import glob
 import math
 import os
+
 import numpy as np
 import pandas as pd
+
 from glicko2_calc import LILA_RATING_PERIOD_DAYS
 
 COHORTS = [
@@ -70,4 +72,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

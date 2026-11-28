@@ -57,7 +57,21 @@ env:
   WARMUP_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.warmup_days || '' }}
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - name: Check PEP 8 & lint rules
+        run: |
+          ruff check .
+          ruff format --check .
+
   sweep-standard:
+    needs: lint
     if: ${{ (github.event.inputs.category || 'all') == 'all' || (github.event.inputs.category || 'all') == 'standard' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -86,6 +100,7 @@ jobs:
           path: "*_sweep.csv"
 
   sweep-variant:
+    needs: lint
     if: ${{ (github.event.inputs.category || 'all') != 'standard' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
