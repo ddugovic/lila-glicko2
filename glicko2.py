@@ -1,7 +1,6 @@
+import duckdb
 import math
-import os
 import numpy as np
-import pandas as pd
 from numba import get_num_threads, njit, prange
 
 # Exact constants from lila (lichess)
@@ -20,19 +19,41 @@ LILA_RATING_PERIOD_DAYS = 1.0 / 0.21436  # ~4.66505 days
 
 
 def load_encoded_games(parquet_path: str):
-    """Load Parquet and factorize player usernames into contiguous int32 IDs."""
-    df = pd.read_parquet(parquet_path, columns=["white", "black", "score", "timestamp"])
+    """Factorizes white/black usernames into contiguous 0-based int32 IDs inside DuckDB without Python string overhead."""
+    con = duckdb.connect()
+    con.execute("SET memory_limit = '10GB';")
+    con.execute("SET temp_directory = '/tmp/duckdb_spill';")
 
-    all_players = pd.concat([df["white"], df["black"]], ignore_index=True)
-    codes, uniques = pd.factorize(all_players, sort=False)
+    con.execute(f"""
+        CREATE TEMP TABLE players AS
+        SELECT username, (ROW_NUMBER() OVER () - 1)::INTEGER AS id
+        FROM (
+            SELECT DISTINCT white AS username FROM '{parquet_path}'
+            UNION
+            SELECT DISTINCT black AS username FROM '{parquet_path}'
+        );
+    """)
+    (n_players,) = con.execute("SELECT COUNT(*) FROM players").fetchone()
 
-    n_games = len(df)
-    white_ids = codes[:n_games].astype(np.int32)
-    black_ids = codes[n_games:].astype(np.int32)
-    scores = df["score"].to_numpy(dtype=np.float64)
-    days = df["timestamp"].to_numpy(dtype=np.float64) / 86400.0
+    encoded = con.execute(f"""
+        SELECT
+            pw.id AS white_id,
+            pb.id AS black_id,
+            g.score::DOUBLE AS score,
+            (g.timestamp::DOUBLE / 86400.0) AS day
+        FROM '{parquet_path}' g
+        JOIN players pw ON g.white = pw.username
+        JOIN players pb ON g.black = pb.username
+        ORDER BY g.timestamp ASC
+    """).fetchnumpy()
 
-    return white_ids, black_ids, scores, days, len(uniques)
+    return (
+        encoded["white_id"],
+        encoded["black_id"],
+        encoded["score"],
+        encoded["day"],
+        int(n_players),
+    )
 
 
 @njit(fastmath=True, cache=True)
