@@ -73,19 +73,27 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Glicko-2 sweep
+      - name: Run standard chess sweep
+        if: env.CATEGORY == 'all' || env.CATEGORY == 'standard'
         run: |
-          echo "Category: $CATEGORY | Speed: $SPEED | Partitions: $PARTITIONS | Warmup: ${WARMUP_DAYS:-default}"
-          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-            echo "**Run Config:** category=\`$CATEGORY\`, speed=\`$SPEED\`, partitions=\`$PARTITIONS\`, warmup=\`${WARMUP_DAYS:-default}\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
           WARMUP_ARG=""
           if [ -n "$WARMUP_DAYS" ]; then
             WARMUP_ARG="--warmup-days $WARMUP_DAYS"
           fi
-          python3 batch_sweep.py --category $CATEGORY --speed $SPEED --partitions $PARTITIONS $WARMUP_ARG
+          python3 batch_sweep.py --category standard --speed $SPEED --partitions $PARTITIONS $WARMUP_ARG
+
+      - name: Run variants sweep
+        if: env.CATEGORY != 'standard'
+        run: |
+          VAR_CAT="$CATEGORY"
+          if [ "$CATEGORY" = "all" ]; then
+            VAR_CAT="variants"
+          fi
+          WARMUP_ARG=""
+          if [ -n "$WARMUP_DAYS" ]; then
+            WARMUP_ARG="--warmup-days $WARMUP_DAYS"
+          fi
+          python3 batch_sweep.py --category $VAR_CAT --speed $SPEED --partitions $PARTITIONS $WARMUP_ARG
 
       - name: Upload sweep CSV artifacts
         if: always()
