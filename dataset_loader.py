@@ -61,6 +61,10 @@ def prepare_datasets(
     by_repo: dict[str, list[tuple[str, str, str, str]]] = defaultdict(list)
 
     for cat, speed in targets:
+        active_partitions = [p for p in partitions if int(p[:4]) >= 2017] if speed == "ultrabullet" else partitions
+        if not active_partitions:
+            print(f"[{cat}/{speed}] Skipping: UltraBullet did not exist before 2017.")
+            continue
         label = make_label(cat, speed, part_tag, date_tag)
         out_path = f"{label}_rd_tuning.parquet"
         if not refresh and os.path.exists(out_path):
@@ -72,7 +76,7 @@ def prepare_datasets(
     if not by_repo:
         return ready
 
-    prefixes = resolve_partition_prefixes(partitions)
+    prefixes = resolve_partition_prefixes(active_partitions)
     api = HfApi(token=hf_token)
     con = duckdb.connect()
     con.execute("SET memory_limit = '10GB';")
