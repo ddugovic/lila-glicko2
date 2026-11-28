@@ -59,6 +59,7 @@ def resolve_targets(raw_categories: list[str], raw_speeds: list[str] | None) -> 
                 raise ValueError(f"Unknown category '{raw}'. Valid: {valid}")
 
     speeds: list[str] = []
+    include_unsplit_variants = False
     if raw_speeds:
         for item in raw_speeds:
             for raw in item.split(","):
@@ -66,6 +67,7 @@ def resolve_targets(raw_categories: list[str], raw_speeds: list[str] | None) -> 
                 if not key:
                     continue
                 if key == "all":
+                    include_unsplit_variants = True
                     speeds.extend(s for s in STANDARD_SPEEDS if s not in speeds)
                 elif key in VALID_SPEEDS:
                     if key not in speeds:
@@ -80,7 +82,10 @@ def resolve_targets(raw_categories: list[str], raw_speeds: list[str] | None) -> 
                 if (cat, s) not in targets:
                     targets.append((cat, s))
         else:
-            for s in (speeds or ["realtime"]):
+            var_speeds = list(speeds) if speeds else ["realtime"]
+            if include_unsplit_variants and "realtime" not in var_speeds:
+                var_speeds.insert(0, "realtime")
+            for s in var_speeds:
                 if (cat, s) not in targets:
                     targets.append((cat, s))
     return targets
