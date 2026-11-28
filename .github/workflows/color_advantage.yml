@@ -1,14 +1,10 @@
 name: Derive ColorAdvantage
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       category:
-        description: "Category (variants, all, standard, or a specific repo)"
+        description: "Category (all, variants, standard, or a specific repo)"
         required: true
         default: "all"
       speed:
@@ -26,7 +22,7 @@ on:
 
 jobs:
   tune-variant:
-    if: ${{ (github.event.inputs.category || 'variants') != 'standard' }}
+    if: ${{ (github.event.inputs.category || 'all') != 'standard' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -50,7 +46,7 @@ jobs:
           cache-dependency-path: "requirements.txt"
       - run: pip install -r requirements.txt
       - name: Optimize ColorAdvantage for ${{ matrix.variant }}
-        if: ${{ (github.event.inputs.category || 'variants') == 'all' || (github.event.inputs.category || 'variants') == 'variants' || (github.event.inputs.category || 'variants') == matrix.variant }}
+        if: ${{ (github.event.inputs.category || 'all') == 'all' || (github.event.inputs.category || 'all') == 'variants' || (github.event.inputs.category || 'all') == matrix.variant }}
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
@@ -64,7 +60,7 @@ jobs:
           python3 tune_color_adv.py "${ARGS[@]}"
 
   tune-standard:
-    if: ${{ (github.event.inputs.category || 'variants') == 'all' || (github.event.inputs.category || 'variants') == 'standard' }}
+    if: ${{ (github.event.inputs.category || 'all') == 'all' || (github.event.inputs.category || 'all') == 'standard' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
